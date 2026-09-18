@@ -220,7 +220,7 @@
   .report-ind-note{ font-size:.88rem; color:var(--ink-soft); white-space:pre-wrap; }
   .report-print-header{ display:none; }
   @media print{
-    .report-print-header{ display:block; text-align:center; margin-bottom:20px; }
+    .report-print-header{ display:block; text-align:center; margin-bottom:10px; }
     .report-crit-block{ break-inside:avoid; }
     .report-ind{ break-inside:avoid; }
     .report-entry{ break-inside:avoid; }
@@ -1295,9 +1295,9 @@ function renderEvidenceReport(app, scope){
       '<button class="btn-outline no-print" id="btnPrintReport">PDF ஆக பதிவிறக்கு (Print → Save as PDF)</button> '+
       '<button class="btn-ghost no-print" id="btnBackReport">← திரும்பு</button>'
     ) +
-    '<div class="report-print-header">'+brandMarkHtml(60)+
-      '<h1 style="margin:6px 0 2px">'+escapeHtml(state.school.name||'')+'</h1>'+
-      '<div style="color:var(--ink-soft);font-size:.85rem">'+escapeHtml(subtitle)+' · '+escapeHtml(todayStr)+'</div>'+
+    '<div class="report-print-header">'+brandMarkHtml(34)+
+      '<h1 style="margin:4px 0 2px;font-size:1.05rem;font-weight:700">'+escapeHtml(state.school.name||'')+'</h1>'+
+      '<div style="color:var(--ink-soft);font-size:.78rem">'+escapeHtml(subtitle)+' · '+escapeHtml(todayStr)+'</div>'+
     '</div>'+
     '<div class="setup-notice no-print">இந்தப் பக்கத்தை PDF கோப்பாகச் சேமிக்க, மேலே உள்ள பொத்தானை அழுத்தி, திறக்கும் Print சாளரத்தில் "Destination" இல் <strong>Save as PDF</strong> ஐத் தேர்ந்தெடுத்து Save செய்யவும்.</div>'+
     '<div id="reportBody">'+bodyHtml+'</div>'+
@@ -1547,9 +1547,3 @@ if('serviceWorker' in navigator){
     navigator.serviceWorker.register('sw.js').catch(function(){ /* fine if this fails, e.g. opened via file:// */ });
   });
 }
-
-})();
-
-</script>
-</body>
-</html>
