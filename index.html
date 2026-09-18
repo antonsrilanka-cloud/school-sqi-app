@@ -133,6 +133,7 @@
   }
   .ind-row:first-child{ border-top:none; padding-top:0; }
   .ind-num{ font-size:.78rem; color:var(--ink-soft); padding-top:10px; width:20px; flex:0 0 auto; }
+  .ind-num.wide{ width:70px; white-space:normal; line-height:1.2; }
   .ind-main{ flex:1; display:flex; flex-direction:column; gap:8px; min-width:0; }
   .ind-title{ font-weight:500; }
   .ind-controls{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
@@ -693,6 +694,21 @@ function d1IndicatorMode(cIdx){
   return 'count';
 }
 
+/* மாணவர் அடைவு (d1) துறையின் நியதிகளுக்குள் உள்ள ஒவ்வொரு சுட்டிக்கும்
+   அதிகாரப்பூர்வ வழிகாட்டியில் உள்ளபடியான உப பிரிவு இலக்கம். PDF இல் சில
+   பாடங்கள் ஒரே வரியாக இணைக்கப்பட்டிருந்ததால் (எ.கா. 1.2.2.7), அவற்றைத்
+   தனித்தனியாகப் பிரித்துக் காட்டும் இடங்களில் அ/ஆ/இ எனச் சேர்க்கப்பட்டுள்ளது. */
+var D1_IND_NUMBERS = [
+  ['1.1.1.1','1.1.1.2','1.1.1.3'],
+  ['1.1.2.1','1.2.1.1','1.2.1.2','1.2.1.3','1.2.1.4','1.2.1.5','1.2.1.6'],
+  ['1.2.2.1','1.2.2.2','1.2.2.3','1.2.2.4','1.2.2.5','1.2.2.6','1.2.2.7அ','1.2.2.7ஆ','1.2.2.7இ','1.2.2.8','1.2.2.9','1.2.2.10','1.2.2.11','1.2.2.12','1.2.2.13-15'],
+  ['1.2.3.1','1.2.3.2','1.2.3.3'],
+  ['1.2.4.1','1.2.4.2','1.2.4.3','1.2.4.4','1.2.4.5','1.2.4.6','1.2.4.7']
+];
+function d1NumberFor(cIdx, iIdx){
+  return (D1_IND_NUMBERS[cIdx] && D1_IND_NUMBERS[cIdx][iIdx]) ? D1_IND_NUMBERS[cIdx][iIdx] : null;
+}
+
 function deptById(id){ for(var i=0;i<DEPARTMENTS.length;i++) if(DEPARTMENTS[i].id===id) return DEPARTMENTS[i]; return null; }
 
 function todayStr(){ return new Date().toISOString().slice(0,10); }
@@ -1083,7 +1099,7 @@ function qtyControlsHtml(ind, mode){
   '</div>';
 }
 
-function indicatorRowHtml(ind, idx, mode, noEvidence){
+function indicatorRowHtml(ind, idx, mode, noEvidence, numLabel){
   var entries = ind.entries || [];
   var controlsHtml = (mode==='count'||mode==='percent')
     ? qtyControlsHtml(ind, mode)
@@ -1093,7 +1109,7 @@ function indicatorRowHtml(ind, idx, mode, noEvidence){
     (entries.length ? '' : '<p class="hint" style="margin:2px 0 8px">இதுவரை பதிவுகள் இல்லை — வெவ்வேறு திகதிகளில் நடந்த சான்றுகளை (எ.கா. வெவ்வேறு வகுப்பறை தரவட்டங்கள்) தனித்தனியாகச் சேர்க்கலாம்.</p>')+
     '<button type="button" class="btn-outline small" data-role="addentry">+ புதிய பதிவு சேர் (திகதியுடன்)</button>';
   return '<div class="ind-row" data-ind="'+ind.id+'">'+
-    '<div class="ind-num">'+(idx+1)+'</div>'+
+    '<div class="ind-num'+(numLabel?' wide':'')+'">'+escapeHtml(numLabel||String(idx+1))+'</div>'+
     '<div class="ind-main">'+
       '<input class="ind-title" type="text" data-role="title" value="'+escapeHtml(ind.title)+'" placeholder="சுட்டியின் விபரம்">'+
       controlsHtml+
@@ -1111,7 +1127,7 @@ function criterionHtml(c, cIdx, isAdmin, deptId){
       '<input class="crit-title" type="text" data-role="ctitle" value="'+escapeHtml(c.title)+'">'+
       (isAdmin ? '<button type="button" class="btn-tiny" data-role="printcrit" title="இந்த நியதியை மட்டும் PDF ஆக பதிவிறக்கு">நியதி PDF</button>' : '')+
     '</div>'+
-    '<div class="ind-list">'+c.indicators.map(function(ind,i){ return indicatorRowHtml(ind,i,mode,noEvidence); }).join('')+'</div>'+
+    '<div class="ind-list">'+c.indicators.map(function(ind,i){ return indicatorRowHtml(ind,i,mode,noEvidence,(deptId==='d1')?d1NumberFor(cIdx,i):null); }).join('')+'</div>'+
   '</section>';
 }
 
@@ -1340,8 +1356,9 @@ function renderAdminOverview(app){
 
 /* ---- school setup / user management ---- */
 
-function reportIndicatorHtml(ind){
+function reportIndicatorHtml(ind, numLabel){
   var scoreTxt = (ind.score && ind.score>0) ? SCORE_LABELS[ind.score] : 'மதிப்பிடப்படவில்லை';
+  var numPrefix = numLabel ? escapeHtml(numLabel)+' — ' : '';
   if(ind.qty){
     var qtySummary;
     if(ind.qty.pct!=null){
@@ -1351,7 +1368,7 @@ function reportIndicatorHtml(ind){
       qtySummary = 'மொத்தம்: '+(ind.qty.total!=null?ind.qty.total:'—')+' · அடைந்தோர்: '+(ind.qty.achieved!=null?ind.qty.achieved:'—')+' · நூற்றுவீதம்: '+(pct2!=null?pct2+'%':'—');
     }
     return '<div class="report-ind">'+
-      '<div class="report-ind-title">'+escapeHtml(ind.title)+'</div>'+
+      '<div class="report-ind-title">'+numPrefix+escapeHtml(ind.title)+'</div>'+
       '<div class="report-ind-note">'+escapeHtml(qtySummary)+'</div>'+
       '<div class="badge small" style="margin-top:6px">'+escapeHtml(scoreTxt)+'</div>'+
     '</div>';
@@ -1369,7 +1386,7 @@ function reportIndicatorHtml(ind){
     '</div>';
   }).join('') : '<p class="hint">இதுவரை எந்தப் பதிவும் இடப்படவில்லை.</p>';
   return '<div class="report-ind">'+
-    '<div class="report-ind-title">'+escapeHtml(ind.title)+'</div>'+
+    '<div class="report-ind-title">'+numPrefix+escapeHtml(ind.title)+'</div>'+
     '<div class="badge small" style="margin-bottom:8px">'+escapeHtml(scoreTxt)+'</div>'+
     entriesHtml+
   '</div>';
@@ -1382,7 +1399,7 @@ function reportDeptHtml(deptId){
   var body = dData.criteria.map(function(c, i){
     return '<div class="report-crit-block">'+
       '<div class="report-crit-title">நியதி '+(i+1)+' — '+escapeHtml(c.title)+'</div>'+
-      c.indicators.map(reportIndicatorHtml).join('')+
+      c.indicators.map(function(ind,j){ return reportIndicatorHtml(ind,(deptId==='d1')?d1NumberFor(i,j):null); }).join('')+
     '</div>';
   }).join('');
   return '<section style="margin-bottom:34px">'+
@@ -1402,7 +1419,7 @@ function reportSingleCritHtml(deptId, critId){
     '<h2 style="color:var(--maroon-deep)">'+escapeHtml(dept.name)+'</h2>'+
     '<div class="report-crit-block">'+
       '<div class="report-crit-title">நியதி '+(idx+1)+' — '+escapeHtml(c.title)+'</div>'+
-      c.indicators.map(reportIndicatorHtml).join('')+
+      c.indicators.map(function(ind,j){ return reportIndicatorHtml(ind,(deptId==='d1')?d1NumberFor(idx,j):null); }).join('')+
     '</div>'+
   '</section>';
 }
