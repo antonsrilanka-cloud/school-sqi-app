@@ -1017,7 +1017,6 @@ function indicatorRowHtml(ind, idx){
       (entries.length ? '' : '<p class="hint" style="margin:2px 0 8px">இதுவரை பதிவுகள் இல்லை — வெவ்வேறு திகதிகளில் நடந்த சான்றுகளை (எ.கா. வெவ்வேறு வகுப்பறை தரவட்டங்கள்) தனித்தனியாகச் சேர்க்கலாம்.</p>')+
       '<button type="button" class="btn-outline small" data-role="addentry">+ புதிய பதிவு சேர் (திகதியுடன்)</button>'+
     '</div>'+
-    '<button type="button" class="btn-icon danger" data-role="delind" title="சுட்டியை நீக்கு">✕</button>'+
   '</div>';
 }
 
@@ -1030,7 +1029,6 @@ function criterionHtml(c, cIdx, isAdmin){
       '<button type="button" class="btn-icon danger" data-role="delcrit" title="நியதியை நீக்கு">✕</button>'+
     '</div>'+
     '<div class="ind-list">'+c.indicators.map(function(ind,i){ return indicatorRowHtml(ind,i); }).join('')+'</div>'+
-    '<button type="button" class="btn-outline small" data-role="addind">+ சுட்டி சேர்</button>'+
   '</section>';
 }
 
@@ -1113,11 +1111,6 @@ function renderDeptView(app, deptId, opts){
         renderDeptView(app, deptId, opts);
       }
     };
-    critEl.querySelector('[data-role="addind"]').onclick=function(){
-      c.indicators.push({id:uid(), title:'புதிய சுட்டி', score:0, entries:[]});
-      scheduleSaveDept(deptId);
-      renderDeptView(app, deptId, opts);
-    };
 
     critEl.querySelectorAll('.ind-row').forEach(function(rowEl){
       var indId = rowEl.getAttribute('data-ind');
@@ -1131,13 +1124,6 @@ function renderDeptView(app, deptId, opts){
         ind.score=parseInt(e.target.value,10)||0;
         scheduleSaveDept(deptId);
         renderDeptView(app, deptId, opts);
-      };
-      rowEl.querySelector('[data-role="delind"]').onclick=function(){
-        if(confirm('இந்தச் சுட்டியையும் அதன் கீழுள்ள அனைத்துப் பதிவுகளையும் நீக்கவா?')){
-          c.indicators = c.indicators.filter(function(x){ return x.id!==ind.id; });
-          scheduleSaveDept(deptId);
-          renderDeptView(app, deptId, opts);
-        }
       };
       rowEl.querySelector('[data-role="addentry"]').onclick=function(){
         ind.entries.push({id:uid(), date:todayStr(), note:'', imageData:null, imageName:null});
