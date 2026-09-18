@@ -137,6 +137,10 @@
   .ind-title{ font-weight:500; }
   .ind-controls{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
   .ind-score{ max-width:280px; }
+  .ind-qty{ display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; margin-bottom:8px; }
+  .ind-qty input[type="number"]{ width:110px; }
+  .qty-result{ font-size:.9rem; color:var(--ink-soft); padding-bottom:6px; }
+  .qty-result .badge{ font-size:.78rem; }
   .file-btn{
     display:inline-flex; align-items:center; gap:6px; border:1px solid var(--line); border-radius:var(--radius);
     padding:8px 12px; font-size:.85rem; cursor:pointer; color:var(--ink-soft);
@@ -667,6 +671,26 @@ function gradeInfo(pct){
   return {label:'மிகவேகமாக அபிவிருத்தி அடைய வேண்டும்', cls:'grade-1'};
 }
 
+/* மாணவர் அடைவு (d1) துறையின் அளவீட்டு நியதிகளுக்கு: அதிகாரப்பூர்வ வழிகாட்டியில்
+   உள்ள புள்ளி வழங்கல் வரம்புகளின்படி நூற்றுவீதத்திலிருந்து புள்ளியைக் கணக்கிடுதல். */
+function pointFromPercent(pct){
+  if(pct==null || isNaN(pct)) return 0;
+  if(pct>=90) return 6;
+  if(pct>=75) return 5;
+  if(pct>=60) return 4;
+  if(pct>=45) return 3;
+  if(pct>=25) return 2;
+  return 1;
+}
+/* d1 இன் ஒவ்வொரு நியதிக்கும் (criteria index) எந்த உள்ளீட்டு முறை என்பதை
+   தீர்மானித்தல்: 'count' = மொத்தம்/அடைந்தோர் எண்ணிக்கை, 'percent' = நேரடி
+   சராசரி %, 'manual' = ஏனைய துறைகளைப் போன்ற கைமுறை 1-6 புள்ளி தெரிவு. */
+function d1IndicatorMode(cIdx){
+  if(cIdx===2) return 'percent';
+  if(cIdx===4) return 'manual';
+  return 'count';
+}
+
 function deptById(id){ for(var i=0;i<DEPARTMENTS.length;i++) if(DEPARTMENTS[i].id===id) return DEPARTMENTS[i]; return null; }
 
 function todayStr(){ return new Date().toISOString().slice(0,10); }
@@ -718,6 +742,15 @@ function computeDeptStats(deptId){
   var percent = scored>0 ? Math.round((sum/(scored*6))*100) : null;
   var grade = percent!=null ? gradeInfo(percent) : null;
   return {total:total, scored:scored, percent:percent, grade:grade};
+}
+
+function refreshDeptStatsUI(deptId){
+  var stats = computeDeptStats(deptId);
+  var grade = stats.grade;
+  var pEl = document.getElementById('deptStatPercent'); if(pEl) pEl.textContent = stats.percent!=null ? stats.percent+'%' : '—';
+  var sEl = document.getElementById('deptStatScored'); if(sEl) sEl.textContent = stats.scored+'/'+stats.total;
+  var bEl = document.getElementById('deptStatBadge');
+  if(bEl){ bEl.textContent = grade ? grade.label : 'தொடங்கவில்லை'; bEl.className = 'badge '+(grade?grade.cls:''); }
 }
 
 function computeSchoolStats(){
@@ -1004,30 +1037,56 @@ function entryRowHtml(entry){
   '</div>';
 }
 
-function indicatorRowHtml(ind, idx){
+function qtyControlsHtml(ind, mode){
+  var qty = ind.qty || {};
+  var pointTxt = (ind.score && ind.score>0) ? SCORE_LABELS[ind.score] : 'மதிப்பிடப்படவில்லை';
+  if(mode==='percent'){
+    var pctVal = (qty.pct!=null) ? qty.pct : '';
+    return '<div class="ind-qty">'+
+      '<div class="field small" style="margin-bottom:0"><label>சராசரி நூற்றுவீதம் (%)</label>'+
+        '<input type="number" min="0" max="100" step="0.1" data-role="qpctinput" value="'+escapeHtml(String(pctVal))+'"></div>'+
+      '<div class="qty-result"><span class="badge" data-role="qpoint">'+escapeHtml(pointTxt)+'</span></div>'+
+    '</div>';
+  }
+  var total = (qty.total!=null) ? qty.total : '';
+  var achieved = (qty.achieved!=null) ? qty.achieved : '';
+  var pct = (qty.total>0 && qty.achieved!=null && !isNaN(qty.achieved)) ? Math.round((qty.achieved/qty.total)*100) : null;
+  return '<div class="ind-qty">'+
+    '<div class="field small" style="margin-bottom:0"><label>மொத்த எண்ணிக்கை</label><input type="number" min="0" data-role="qtotal" value="'+escapeHtml(String(total))+'"></div>'+
+    '<div class="field small" style="margin-bottom:0"><label>அடைந்தோர் எண்ணிக்கை</label><input type="number" min="0" data-role="qachieved" value="'+escapeHtml(String(achieved))+'"></div>'+
+    '<div class="qty-result"><span data-role="qpct">'+(pct!=null?pct+'%':'—')+'</span> · <span class="badge" data-role="qpoint">'+escapeHtml(pointTxt)+'</span></div>'+
+  '</div>';
+}
+
+function indicatorRowHtml(ind, idx, mode, noEvidence){
   var entries = ind.entries || [];
+  var controlsHtml = (mode==='count'||mode==='percent')
+    ? qtyControlsHtml(ind, mode)
+    : '<div class="ind-controls"><select class="ind-score" data-role="score">'+scoreSelectHtml(ind.score)+'</select></div>';
+  var evidenceHtml = noEvidence ? '' :
+    '<div class="entries-list">'+entries.map(entryRowHtml).join('')+'</div>'+
+    (entries.length ? '' : '<p class="hint" style="margin:2px 0 8px">இதுவரை பதிவுகள் இல்லை — வெவ்வேறு திகதிகளில் நடந்த சான்றுகளை (எ.கா. வெவ்வேறு வகுப்பறை தரவட்டங்கள்) தனித்தனியாகச் சேர்க்கலாம்.</p>')+
+    '<button type="button" class="btn-outline small" data-role="addentry">+ புதிய பதிவு சேர் (திகதியுடன்)</button>';
   return '<div class="ind-row" data-ind="'+ind.id+'">'+
     '<div class="ind-num">'+(idx+1)+'</div>'+
     '<div class="ind-main">'+
       '<input class="ind-title" type="text" data-role="title" value="'+escapeHtml(ind.title)+'" placeholder="சுட்டியின் விபரம்">'+
-      '<div class="ind-controls">'+
-        '<select class="ind-score" data-role="score">'+scoreSelectHtml(ind.score)+'</select>'+
-      '</div>'+
-      '<div class="entries-list">'+entries.map(entryRowHtml).join('')+'</div>'+
-      (entries.length ? '' : '<p class="hint" style="margin:2px 0 8px">இதுவரை பதிவுகள் இல்லை — வெவ்வேறு திகதிகளில் நடந்த சான்றுகளை (எ.கா. வெவ்வேறு வகுப்பறை தரவட்டங்கள்) தனித்தனியாகச் சேர்க்கலாம்.</p>')+
-      '<button type="button" class="btn-outline small" data-role="addentry">+ புதிய பதிவு சேர் (திகதியுடன்)</button>'+
+      controlsHtml+
+      evidenceHtml+
     '</div>'+
   '</div>';
 }
 
-function criterionHtml(c, cIdx, isAdmin){
+function criterionHtml(c, cIdx, isAdmin, deptId){
+  var mode = null, noEvidence = false;
+  if(deptId==='d1'){ mode = d1IndicatorMode(cIdx); noEvidence = true; }
   return '<section class="criterion" data-crit="'+c.id+'">'+
     '<div class="criterion-head">'+
       '<span class="crit-num">நியதி '+(cIdx+1)+'</span>'+
       '<input class="crit-title" type="text" data-role="ctitle" value="'+escapeHtml(c.title)+'">'+
       (isAdmin ? '<button type="button" class="btn-tiny" data-role="printcrit" title="இந்த நியதியை மட்டும் PDF ஆக பதிவிறக்கு">நியதி PDF</button>' : '')+
     '</div>'+
-    '<div class="ind-list">'+c.indicators.map(function(ind,i){ return indicatorRowHtml(ind,i); }).join('')+'</div>'+
+    '<div class="ind-list">'+c.indicators.map(function(ind,i){ return indicatorRowHtml(ind,i,mode,noEvidence); }).join('')+'</div>'+
   '</section>';
 }
 
@@ -1055,13 +1114,13 @@ function renderDeptView(app, deptId, opts){
     '<div class="dept-header">'+
       '<h1>'+escapeHtml(dept.name)+'</h1>'+
       '<p class="dept-sub">'+dept.en+'</p>'+
-      '<div class="stat-row">'+
-        '<div class="stat-box"><span class="stat-num">'+(stats.percent!=null?stats.percent+'%':'—')+'</span><span class="stat-label">அடைந்த சதவீதம்</span></div>'+
-        '<div class="stat-box"><span class="stat-num">'+stats.scored+'/'+stats.total+'</span><span class="stat-label">மதிப்பிடப்பட்ட சுட்டிகள்</span></div>'+
-        '<div class="stat-box"><span class="badge '+(grade?grade.cls:'')+'">'+(grade?grade.label:'தொடங்கவில்லை')+'</span></div>'+
+      '<div class="stat-row" id="deptStatRow">'+
+        '<div class="stat-box"><span class="stat-num" id="deptStatPercent">'+(stats.percent!=null?stats.percent+'%':'—')+'</span><span class="stat-label">அடைந்த சதவீதம்</span></div>'+
+        '<div class="stat-box"><span class="stat-num" id="deptStatScored">'+stats.scored+'/'+stats.total+'</span><span class="stat-label">மதிப்பிடப்பட்ட சுட்டிகள்</span></div>'+
+        '<div class="stat-box"><span class="badge '+(grade?grade.cls:'')+'" id="deptStatBadge">'+(grade?grade.label:'தொடங்கவில்லை')+'</span></div>'+
       '</div>'+
     '</div>'+
-    '<div class="criteria-list" id="criteriaList">'+dData.criteria.map(function(c,i){ return criterionHtml(c,i,!!opts.admin); }).join('')+'</div>'+
+    '<div class="criteria-list" id="criteriaList">'+dData.criteria.map(function(c,i){ return criterionHtml(c,i,!!opts.admin,deptId); }).join('')+'</div>'+
     '<div class="reflect-box">'+
       '<label>இந்தத் துறை தொடர்பான கலந்துரையாடல் குறிப்புகள்</label>'+
       '<textarea id="deptNote" placeholder="கலந்துரையாடலில் எழுந்த முக்கிய கருத்துகளை இங்கு பதிவு செய்யவும்">'+escapeHtml(dData.note||'')+'</textarea>'+
@@ -1105,16 +1164,53 @@ function renderDeptView(app, deptId, opts){
       if(!ind.entries) ind.entries = [];
 
       rowEl.querySelector('[data-role="title"]').oninput=function(e){ ind.title=e.target.value; scheduleSaveDept(deptId); };
-      rowEl.querySelector('[data-role="score"]').onchange=function(e){
-        ind.score=parseInt(e.target.value,10)||0;
-        scheduleSaveDept(deptId);
-        renderDeptView(app, deptId, opts);
-      };
-      rowEl.querySelector('[data-role="addentry"]').onclick=function(){
-        ind.entries.push({id:uid(), date:todayStr(), note:'', imageData:null, imageName:null});
-        scheduleSaveDept(deptId);
-        renderDeptView(app, deptId, opts);
-      };
+      var scoreSel = rowEl.querySelector('[data-role="score"]');
+      if(scoreSel){
+        scoreSel.onchange=function(e){
+          ind.score=parseInt(e.target.value,10)||0;
+          scheduleSaveDept(deptId);
+          renderDeptView(app, deptId, opts);
+        };
+      }
+      var qTotalEl = rowEl.querySelector('[data-role="qtotal"]');
+      var qAchievedEl = rowEl.querySelector('[data-role="qachieved"]');
+      if(qTotalEl && qAchievedEl){
+        var recomputeCount = function(){
+          var t = qTotalEl.value===''? null : parseFloat(qTotalEl.value);
+          var a = qAchievedEl.value===''? null : parseFloat(qAchievedEl.value);
+          if(t!=null && isNaN(t)) t=null;
+          if(a!=null && isNaN(a)) a=null;
+          ind.qty = {total:t, achieved:a};
+          var pct = (t>0 && a!=null) ? Math.round((a/t)*100) : null;
+          ind.score = pct!=null ? pointFromPercent(pct) : 0;
+          var pctSpan = rowEl.querySelector('[data-role="qpct"]'); if(pctSpan) pctSpan.textContent = pct!=null ? pct+'%' : '—';
+          var pointSpan = rowEl.querySelector('[data-role="qpoint"]'); if(pointSpan) pointSpan.textContent = ind.score ? SCORE_LABELS[ind.score] : 'மதிப்பிடப்படவில்லை';
+          scheduleSaveDept(deptId);
+          refreshDeptStatsUI(deptId);
+        };
+        qTotalEl.oninput = recomputeCount;
+        qAchievedEl.oninput = recomputeCount;
+      }
+      var qPctEl = rowEl.querySelector('[data-role="qpctinput"]');
+      if(qPctEl){
+        qPctEl.oninput = function(){
+          var v = qPctEl.value===''? null : parseFloat(qPctEl.value);
+          if(v!=null && isNaN(v)) v=null;
+          ind.qty = {pct:v};
+          ind.score = (v!=null) ? pointFromPercent(v) : 0;
+          var pointSpan = rowEl.querySelector('[data-role="qpoint"]'); if(pointSpan) pointSpan.textContent = ind.score ? SCORE_LABELS[ind.score] : 'மதிப்பிடப்படவில்லை';
+          scheduleSaveDept(deptId);
+          refreshDeptStatsUI(deptId);
+        };
+      }
+      var addEntryBtn = rowEl.querySelector('[data-role="addentry"]');
+      if(addEntryBtn){
+        addEntryBtn.onclick=function(){
+          ind.entries.push({id:uid(), date:todayStr(), note:'', imageData:null, imageName:null});
+          scheduleSaveDept(deptId);
+          renderDeptView(app, deptId, opts);
+        };
+      }
 
       rowEl.querySelectorAll('.entry-row').forEach(function(entryEl){
         var entryId = entryEl.getAttribute('data-entry');
@@ -1221,6 +1317,20 @@ function renderAdminOverview(app){
 
 function reportIndicatorHtml(ind){
   var scoreTxt = (ind.score && ind.score>0) ? SCORE_LABELS[ind.score] : 'மதிப்பிடப்படவில்லை';
+  if(ind.qty){
+    var qtySummary;
+    if(ind.qty.pct!=null){
+      qtySummary = 'சராசரி நூற்றுவீதம்: '+ind.qty.pct+'%';
+    } else {
+      var pct2 = (ind.qty.total>0 && ind.qty.achieved!=null) ? Math.round((ind.qty.achieved/ind.qty.total)*100) : null;
+      qtySummary = 'மொத்தம்: '+(ind.qty.total!=null?ind.qty.total:'—')+' · அடைந்தோர்: '+(ind.qty.achieved!=null?ind.qty.achieved:'—')+' · நூற்றுவீதம்: '+(pct2!=null?pct2+'%':'—');
+    }
+    return '<div class="report-ind">'+
+      '<div class="report-ind-title">'+escapeHtml(ind.title)+'</div>'+
+      '<div class="report-ind-note">'+escapeHtml(qtySummary)+'</div>'+
+      '<div class="badge small" style="margin-top:6px">'+escapeHtml(scoreTxt)+'</div>'+
+    '</div>';
+  }
   var entries = (ind.entries || []).slice().sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
   var entriesHtml = entries.length ? entries.map(function(e){
     var img = e.imageData
