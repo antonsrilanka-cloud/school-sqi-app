@@ -1026,7 +1026,6 @@ function criterionHtml(c, cIdx, isAdmin){
       '<span class="crit-num">நியதி '+(cIdx+1)+'</span>'+
       '<input class="crit-title" type="text" data-role="ctitle" value="'+escapeHtml(c.title)+'">'+
       (isAdmin ? '<button type="button" class="btn-tiny" data-role="printcrit" title="இந்த நியதியை மட்டும் PDF ஆக பதிவிறக்கு">நியதி PDF</button>' : '')+
-      '<button type="button" class="btn-icon danger" data-role="delcrit" title="நியதியை நீக்கு">✕</button>'+
     '</div>'+
     '<div class="ind-list">'+c.indicators.map(function(ind,i){ return indicatorRowHtml(ind,i); }).join('')+'</div>'+
   '</section>';
@@ -1063,7 +1062,6 @@ function renderDeptView(app, deptId, opts){
       '</div>'+
     '</div>'+
     '<div class="criteria-list" id="criteriaList">'+dData.criteria.map(function(c,i){ return criterionHtml(c,i,!!opts.admin); }).join('')+'</div>'+
-    '<button type="button" class="btn-outline" id="btnAddCrit" style="margin-top:14px">+ புதிய நியதி சேர்</button>'+
     '<div class="reflect-box">'+
       '<label>இந்தத் துறை தொடர்பான கலந்துரையாடல் குறிப்புகள்</label>'+
       '<textarea id="deptNote" placeholder="கலந்துரையாடலில் எழுந்த முக்கிய கருத்துகளை இங்கு பதிவு செய்யவும்">'+escapeHtml(dData.note||'')+'</textarea>'+
@@ -1076,11 +1074,6 @@ function renderDeptView(app, deptId, opts){
     state.view = opts.admin ? 'admin' : 'login';
     if(!opts.admin){ /* keep listening not needed; will resubscribe on next login route */ }
     renderApp();
-  };
-  document.getElementById('btnAddCrit').onclick=function(){
-    dData.criteria.push({id:uid(), title:'புதிய நியதி', indicators:[{id:uid(), title:'புதிய சுட்டி', score:0, entries:[]}]});
-    scheduleSaveDept(deptId);
-    renderDeptView(app, deptId, opts);
   };
   document.getElementById('deptNote').oninput=function(e){ dData.note=e.target.value; scheduleSaveDept(deptId); };
   if(opts.admin){
@@ -1104,14 +1097,6 @@ function renderDeptView(app, deptId, opts){
         renderApp();
       };
     }
-    critEl.querySelector('[data-role="delcrit"]').onclick=function(){
-      if(confirm('"'+c.title+'" நியதியையும் அதன் கீழுள்ள அனைத்து சுட்டிகளையும் நீக்கவா?')){
-        dData.criteria = dData.criteria.filter(function(x){ return x.id!==c.id; });
-        scheduleSaveDept(deptId);
-        renderDeptView(app, deptId, opts);
-      }
-    };
-
     critEl.querySelectorAll('.ind-row').forEach(function(rowEl){
       var indId = rowEl.getAttribute('data-ind');
       var ind = null;
