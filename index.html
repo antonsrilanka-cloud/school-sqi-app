@@ -143,6 +143,10 @@
   }
   .file-btn:hover{ border-color:var(--gold); color:var(--maroon-deep); }
   .ind-thumb-wrap{ display:flex; align-items:center; gap:10px; }
+
+  .entries-list{ display:flex; flex-direction:column; gap:10px; margin:4px 0 10px; }
+  .entry-row{ border:1px solid var(--line); border-radius:5px; padding:10px; background:var(--paper); display:flex; flex-direction:column; gap:8px; }
+  .entry-top{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
   .ind-thumb{ max-width:120px; max-height:90px; border-radius:4px; border:1px solid var(--line); object-fit:cover; }
 
   /* --- reflection box --- */
@@ -205,11 +209,12 @@
   /* ---- evidence / criteria report (printable) ---- */
   .report-crit-block{ margin-bottom:26px; page-break-inside:avoid; }
   .report-crit-title{ font-family:'Noto Serif Tamil',serif; font-weight:700; color:var(--maroon-deep); font-size:1.05rem; border-bottom:2px solid var(--gold); padding-bottom:6px; margin-bottom:12px; }
-  .report-ind{ display:flex; gap:16px; align-items:flex-start; border-top:1px dashed var(--line); padding:14px 0; page-break-inside:avoid; }
+  .report-ind{ display:flex; flex-direction:column; align-items:stretch; gap:8px; border-top:1px dashed var(--line); padding:14px 0; page-break-inside:avoid; margin-bottom:6px; }
   .report-ind:first-child{ border-top:none; }
-  .report-img, .report-img-empty{ width:220px; height:160px; flex:0 0 auto; border-radius:5px; border:1px solid var(--line); }
+  .report-entry{ display:flex; gap:14px; align-items:flex-start; padding:8px 0 8px 10px; border-left:2px solid var(--gold-light); page-break-inside:avoid; }
+  .report-img, .report-img-empty{ width:150px; height:110px; flex:0 0 auto; border-radius:5px; border:1px solid var(--line); }
   .report-img{ object-fit:cover; }
-  .report-img-empty{ display:flex; align-items:center; justify-content:center; background:#F2ECDD; color:var(--ink-soft); font-size:.78rem; text-align:center; padding:6px; }
+  .report-img-empty{ display:flex; align-items:center; justify-content:center; background:#F2ECDD; color:var(--ink-soft); font-size:.75rem; text-align:center; padding:6px; }
   .report-ind-body{ flex:1; min-width:0; }
   .report-ind-title{ font-weight:600; margin-bottom:4px; }
   .report-ind-note{ font-size:.88rem; color:var(--ink-soft); white-space:pre-wrap; }
@@ -218,6 +223,7 @@
     .report-print-header{ display:block; text-align:center; margin-bottom:20px; }
     .report-crit-block{ break-inside:avoid; }
     .report-ind{ break-inside:avoid; }
+    .report-entry{ break-inside:avoid; }
   }
 </style>
 
@@ -663,6 +669,25 @@ function gradeInfo(pct){
 
 function deptById(id){ for(var i=0;i<DEPARTMENTS.length;i++) if(DEPARTMENTS[i].id===id) return DEPARTMENTS[i]; return null; }
 
+function todayStr(){ return new Date().toISOString().slice(0,10); }
+
+/* Older data (or a department created before dated, repeatable entries
+   were added) may have a single top-level note/imageData on an
+   indicator. Fold that into entries[] so nothing is lost, then drop the
+   old fields — the next save rewrites the document in the new shape. */
+function migrateIndicator(ind){
+  if(!ind.entries) ind.entries = [];
+  if(ind.imageData || (ind.note && ind.note.trim())){
+    ind.entries.push({id:uid(), date:todayStr(), note:ind.note||'', imageData:ind.imageData||null, imageName:ind.imageName||null});
+  }
+  delete ind.imageData; delete ind.imageName; delete ind.note;
+}
+function migrateDeptData(dData){
+  if(!dData || !dData.criteria) return dData;
+  dData.criteria.forEach(function(c){ c.indicators.forEach(migrateIndicator); });
+  return dData;
+}
+
 function isTypingInApp(){
   var a = document.activeElement;
   return a && (a.tagName==='INPUT' || a.tagName==='TEXTAREA') && document.getElementById('app').contains(a);
@@ -672,7 +697,7 @@ function buildEmptyDeptData(deptId){
   var seed = REAL_SEED[deptId] || [];
   var criteria = seed.map(function(pair){
     var indicators = pair[1].map(function(title){
-      return {id:uid(), title:title, score:0, note:'', imageData:null, imageName:null};
+      return {id:uid(), title:title, score:0, entries:[]};
     });
     return {id:uid(), title:pair[0], indicators:indicators};
   });
@@ -780,7 +805,7 @@ function subscribeDept(deptId, onChange){
     delete state.deptErrors[deptId];
     if(snap.metadata.hasPendingWrites) return; // our own optimistic write echoing back
     if(snap.exists){
-      state.deptData[deptId] = snap.data();
+      state.deptData[deptId] = migrateDeptData(snap.data());
     } else {
       state.deptData[deptId] = buildEmptyDeptData(deptId);
       db.collection('departments').doc(deptId).set(state.deptData[deptId]).catch(function(){});
@@ -966,18 +991,31 @@ function scoreSelectHtml(selected){
   }).join('');
 }
 
+function entryRowHtml(entry){
+  var hasImg = !!entry.imageData;
+  return '<div class="entry-row" data-entry="'+entry.id+'">'+
+    '<div class="entry-top">'+
+      '<div class="field small" style="margin-bottom:0"><label>திகதி</label><input type="date" data-role="edate" value="'+escapeHtml(entry.date||'')+'"></div>'+
+      '<label class="file-btn">சான்று படம் <input type="file" accept="image/*" data-role="efile" hidden></label>'+
+      '<button type="button" class="btn-tiny" data-role="delentry">இந்தப் பதிவை நீக்கு</button>'+
+    '</div>'+
+    '<textarea class="ind-note" data-role="enote" placeholder="இந்தத் திகதிக்கான குறிப்பு">'+escapeHtml(entry.note||'')+'</textarea>'+
+    (hasImg ? '<div class="ind-thumb-wrap"><img class="ind-thumb" src="'+entry.imageData+'" alt="சான்று படம்"><button type="button" class="btn-tiny" data-role="eremoveimg">படத்தை நீக்கு</button></div>' : '')+
+  '</div>';
+}
+
 function indicatorRowHtml(ind, idx){
-  var hasImg = !!ind.imageData;
+  var entries = ind.entries || [];
   return '<div class="ind-row" data-ind="'+ind.id+'">'+
     '<div class="ind-num">'+(idx+1)+'</div>'+
     '<div class="ind-main">'+
       '<input class="ind-title" type="text" data-role="title" value="'+escapeHtml(ind.title)+'" placeholder="சுட்டியின் விபரம்">'+
       '<div class="ind-controls">'+
         '<select class="ind-score" data-role="score">'+scoreSelectHtml(ind.score)+'</select>'+
-        '<label class="file-btn">சான்று படம் சேர் <input type="file" accept="image/*" data-role="file" hidden></label>'+
       '</div>'+
-      '<textarea class="ind-note" data-role="note" placeholder="குறிப்பு / சான்று விபரம்">'+escapeHtml(ind.note||'')+'</textarea>'+
-      (hasImg ? '<div class="ind-thumb-wrap"><img class="ind-thumb" src="'+ind.imageData+'" alt="சான்று படம்"><button type="button" class="btn-tiny" data-role="removeimg">படத்தை நீக்கு</button></div>' : '')+
+      '<div class="entries-list">'+entries.map(entryRowHtml).join('')+'</div>'+
+      (entries.length ? '' : '<p class="hint" style="margin:2px 0 8px">இதுவரை பதிவுகள் இல்லை — வெவ்வேறு திகதிகளில் நடந்த சான்றுகளை (எ.கா. வெவ்வேறு வகுப்பறை தரவட்டங்கள்) தனித்தனியாகச் சேர்க்கலாம்.</p>')+
+      '<button type="button" class="btn-outline small" data-role="addentry">+ புதிய பதிவு சேர் (திகதியுடன்)</button>'+
     '</div>'+
     '<button type="button" class="btn-icon danger" data-role="delind" title="சுட்டியை நீக்கு">✕</button>'+
   '</div>';
@@ -1042,7 +1080,7 @@ function renderDeptView(app, deptId, opts){
     renderApp();
   };
   document.getElementById('btnAddCrit').onclick=function(){
-    dData.criteria.push({id:uid(), title:'புதிய நியதி', indicators:[{id:uid(), title:'புதிய சுட்டி', score:0, note:'', imageData:null, imageName:null}]});
+    dData.criteria.push({id:uid(), title:'புதிய நியதி', indicators:[{id:uid(), title:'புதிய சுட்டி', score:0, entries:[]}]});
     scheduleSaveDept(deptId);
     renderDeptView(app, deptId, opts);
   };
@@ -1076,7 +1114,7 @@ function renderDeptView(app, deptId, opts){
       }
     };
     critEl.querySelector('[data-role="addind"]').onclick=function(){
-      c.indicators.push({id:uid(), title:'புதிய சுட்டி', score:0, note:'', imageData:null, imageName:null});
+      c.indicators.push({id:uid(), title:'புதிய சுட்டி', score:0, entries:[]});
       scheduleSaveDept(deptId);
       renderDeptView(app, deptId, opts);
     };
@@ -1086,41 +1124,63 @@ function renderDeptView(app, deptId, opts){
       var ind = null;
       for(var j=0;j<c.indicators.length;j++){ if(c.indicators[j].id===indId){ ind=c.indicators[j]; break; } }
       if(!ind) return;
+      if(!ind.entries) ind.entries = [];
 
       rowEl.querySelector('[data-role="title"]').oninput=function(e){ ind.title=e.target.value; scheduleSaveDept(deptId); };
-      rowEl.querySelector('[data-role="note"]').oninput=function(e){ ind.note=e.target.value; scheduleSaveDept(deptId); };
       rowEl.querySelector('[data-role="score"]').onchange=function(e){
         ind.score=parseInt(e.target.value,10)||0;
         scheduleSaveDept(deptId);
         renderDeptView(app, deptId, opts);
       };
       rowEl.querySelector('[data-role="delind"]').onclick=function(){
-        if(confirm('இந்தச் சுட்டியை நீக்கவா?')){
+        if(confirm('இந்தச் சுட்டியையும் அதன் கீழுள்ள அனைத்துப் பதிவுகளையும் நீக்கவா?')){
           c.indicators = c.indicators.filter(function(x){ return x.id!==ind.id; });
           scheduleSaveDept(deptId);
           renderDeptView(app, deptId, opts);
         }
       };
-      var fileInput = rowEl.querySelector('[data-role="file"]');
-      fileInput.onchange=function(e){
-        var f = e.target.files && e.target.files[0];
-        if(!f) return;
-        if(!/^image\//.test(f.type)){ alert('படக்கோப்பை மட்டும் தெரிவு செய்யவும் (jpg, png).'); return; }
-        setSaveStatus('படம் தயார் செய்யப்படுகிறது…');
-        fileToCompressedDataUrl(f).then(function(dataUrl){
-          ind.imageData=dataUrl; ind.imageName=f.name;
-          scheduleSaveDept(deptId);
-          renderDeptView(app, deptId, opts);
-        }).catch(function(err){ alert('படத்தைச் சேர்க்க முடியவில்லை: '+(err&&err.message?err.message:'')); setSaveStatus(''); });
+      rowEl.querySelector('[data-role="addentry"]').onclick=function(){
+        ind.entries.push({id:uid(), date:todayStr(), note:'', imageData:null, imageName:null});
+        scheduleSaveDept(deptId);
+        renderDeptView(app, deptId, opts);
       };
-      var removeBtn = rowEl.querySelector('[data-role="removeimg"]');
-      if(removeBtn){
-        removeBtn.onclick=function(){
-          ind.imageData=null; ind.imageName=null;
-          scheduleSaveDept(deptId);
-          renderDeptView(app, deptId, opts);
+
+      rowEl.querySelectorAll('.entry-row').forEach(function(entryEl){
+        var entryId = entryEl.getAttribute('data-entry');
+        var entry = null;
+        for(var k=0;k<ind.entries.length;k++){ if(ind.entries[k].id===entryId){ entry=ind.entries[k]; break; } }
+        if(!entry) return;
+
+        entryEl.querySelector('[data-role="edate"]').onchange=function(e){ entry.date=e.target.value; scheduleSaveDept(deptId); };
+        entryEl.querySelector('[data-role="enote"]').oninput=function(e){ entry.note=e.target.value; scheduleSaveDept(deptId); };
+        entryEl.querySelector('[data-role="delentry"]').onclick=function(){
+          if(confirm('இந்தப் பதிவை (திகதி, படம், குறிப்பு) நீக்கவா?')){
+            ind.entries = ind.entries.filter(function(x){ return x.id!==entry.id; });
+            scheduleSaveDept(deptId);
+            renderDeptView(app, deptId, opts);
+          }
         };
-      }
+        var efile = entryEl.querySelector('[data-role="efile"]');
+        efile.onchange=function(e){
+          var f = e.target.files && e.target.files[0];
+          if(!f) return;
+          if(!/^image\//.test(f.type)){ alert('படக்கோப்பை மட்டும் தெரிவு செய்யவும் (jpg, png).'); return; }
+          setSaveStatus('படம் தயார் செய்யப்படுகிறது…');
+          fileToCompressedDataUrl(f).then(function(dataUrl){
+            entry.imageData=dataUrl; entry.imageName=f.name;
+            scheduleSaveDept(deptId);
+            renderDeptView(app, deptId, opts);
+          }).catch(function(err){ alert('படத்தைச் சேர்க்க முடியவில்லை: '+(err&&err.message?err.message:'')); setSaveStatus(''); });
+        };
+        var eRemoveBtn = entryEl.querySelector('[data-role="eremoveimg"]');
+        if(eRemoveBtn){
+          eRemoveBtn.onclick=function(){
+            entry.imageData=null; entry.imageName=null;
+            scheduleSaveDept(deptId);
+            renderDeptView(app, deptId, opts);
+          };
+        }
+      });
     });
   });
 }
@@ -1189,17 +1249,23 @@ function renderAdminOverview(app){
 /* ---- school setup / user management ---- */
 
 function reportIndicatorHtml(ind){
-  var img = ind.imageData
-    ? '<img class="report-img" src="'+ind.imageData+'" alt="சான்று படம்">'
-    : '<div class="report-img-empty">சான்று படம்<br>இடப்படவில்லை</div>';
   var scoreTxt = (ind.score && ind.score>0) ? SCORE_LABELS[ind.score] : 'மதிப்பிடப்படவில்லை';
+  var entries = (ind.entries || []).slice().sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
+  var entriesHtml = entries.length ? entries.map(function(e){
+    var img = e.imageData
+      ? '<img class="report-img" src="'+e.imageData+'" alt="சான்று படம்">'
+      : '<div class="report-img-empty">சான்று படம்<br>இடப்படவில்லை</div>';
+    return '<div class="report-entry">'+img+
+      '<div class="report-ind-body">'+
+        '<div style="font-size:.78rem;color:var(--gold);font-weight:600;margin-bottom:3px">திகதி: '+(e.date?escapeHtml(e.date):'—')+'</div>'+
+        '<div class="report-ind-note">'+(e.note ? escapeHtml(e.note) : '<em>குறிப்பு எதுவும் இடப்படவில்லை.</em>')+'</div>'+
+      '</div>'+
+    '</div>';
+  }).join('') : '<p class="hint">இதுவரை எந்தப் பதிவும் இடப்படவில்லை.</p>';
   return '<div class="report-ind">'+
-    img+
-    '<div class="report-ind-body">'+
-      '<div class="report-ind-title">'+escapeHtml(ind.title)+'</div>'+
-      '<div class="badge small" style="margin-bottom:6px">'+escapeHtml(scoreTxt)+'</div>'+
-      '<div class="report-ind-note">'+(ind.note ? escapeHtml(ind.note) : '<em>குறிப்பு எதுவும் இடப்படவில்லை.</em>')+'</div>'+
-    '</div>'+
+    '<div class="report-ind-title">'+escapeHtml(ind.title)+'</div>'+
+    '<div class="badge small" style="margin-bottom:8px">'+escapeHtml(scoreTxt)+'</div>'+
+    entriesHtml+
   '</div>';
 }
 
