@@ -225,10 +225,12 @@
   .report-ind-note{ font-size:.88rem; color:var(--ink-soft); white-space:pre-wrap; }
   .report-print-header{ display:none; }
   @media print{
+    @page{ size: A4; margin: 10mm; }
     .report-print-header{ display:block; text-align:center; margin-bottom:10px; }
     .report-crit-block{ break-inside:avoid; }
     .report-ind{ break-inside:avoid; }
     .report-entry{ break-inside:avoid; }
+    footer.app-footer{ padding:6px 0 0; margin-top:10px; page-break-before:avoid; break-before:avoid; page-break-inside:avoid; break-inside:avoid; }
   }
 </style>
 
