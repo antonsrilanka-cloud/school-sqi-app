@@ -133,10 +133,15 @@
   }
   .ind-row:first-child{ border-top:none; padding-top:0; }
   .ind-num{ font-size:.78rem; color:var(--ink-soft); padding-top:10px; width:20px; flex:0 0 auto; }
+  .ind-num.wide{ width:92px; white-space:normal; line-height:1.25; font-size:.74rem; }
   .ind-main{ flex:1; display:flex; flex-direction:column; gap:8px; min-width:0; }
   .ind-title{ font-weight:500; }
   .ind-controls{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
   .ind-score{ max-width:280px; }
+  .ind-qty{ display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; margin-bottom:8px; }
+  .ind-qty input[type="number"]{ width:110px; }
+  .qty-result{ font-size:.9rem; color:var(--ink-soft); padding-bottom:6px; }
+  .qty-result .badge{ font-size:.78rem; }
   .file-btn{
     display:inline-flex; align-items:center; gap:6px; border:1px solid var(--line); border-radius:var(--radius);
     padding:8px 12px; font-size:.85rem; cursor:pointer; color:var(--ink-soft);
@@ -147,7 +152,7 @@
   .entries-list{ display:flex; flex-direction:column; gap:10px; margin:4px 0 10px; }
   .entry-row{ border:1px solid var(--line); border-radius:5px; padding:10px; background:var(--paper); display:flex; flex-direction:column; gap:8px; }
   .entry-top{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
-  .ind-thumb{ max-width:120px; max-height:90px; border-radius:4px; border:1px solid var(--line); object-fit:cover; }
+ .ind-thumb{ max-width:260px; max-height:190px; border-radius:4px; border:1px solid var(--line); object-fit:cover; }
 
   /* --- reflection box --- */
   .reflect-box{ margin-top:20px; padding:14px 16px; background:var(--paper-2); border:1px dashed var(--line); border-radius:6px; }
@@ -220,7 +225,7 @@
   .report-ind-note{ font-size:.88rem; color:var(--ink-soft); white-space:pre-wrap; }
   .report-print-header{ display:none; }
   @media print{
-    .report-print-header{ display:block; text-align:center; margin-bottom:20px; }
+    .report-print-header{ display:block; text-align:center; margin-bottom:10px; }
     .report-crit-block{ break-inside:avoid; }
     .report-ind{ break-inside:avoid; }
     .report-entry{ break-inside:avoid; }
@@ -633,12 +638,14 @@ var state = {
   view:'boot',
   user:null,
   role:null,
+  schoolId:null,       // null = the original school (legacy top-level Firestore paths). A real id = a school created via the Super Admin console (schools/{schoolId}/... paths).
   currentDept:null,
   school:{name:'', year:String(new Date().getFullYear())},
   deptData:{},        // deptId -> {note, criteria:[...]}
   deptUnsub:{},        // deptId -> unsubscribe fn
   deptErrors:{},       // deptId -> error code/message, if the read/subscribe failed
   usersCache:[],
+  schoolsCache:[],     // Super Admin: list of {id, name, year, createdAt}
   schoolUnsub:null,
   fatalError:null,
   reportScope:null,
@@ -665,6 +672,114 @@ function gradeInfo(pct){
   if(pct>=50) return {label:'சாதாரணம்', cls:'grade-3'};
   if(pct>=40) return {label:'அபிவிருத்தி அடைய வேண்டும்', cls:'grade-2'};
   return {label:'மிகவேகமாக அபிவிருத்தி அடைய வேண்டும்', cls:'grade-1'};
+}
+
+/* மாணவர் அடைவு (d1) துறையின் அளவீட்டு நியதிகளுக்கு: அதிகாரப்பூர்வ வழிகாட்டியில்
+   உள்ள புள்ளி வழங்கல் வரம்புகளின்படி நூற்றுவீதத்திலிருந்து புள்ளியைக் கணக்கிடுதல். */
+function pointFromPercent(pct){
+  if(pct==null || isNaN(pct)) return 0;
+  if(pct>=90) return 6;
+  if(pct>=75) return 5;
+  if(pct>=60) return 4;
+  if(pct>=45) return 3;
+  if(pct>=25) return 2;
+  return 1;
+}
+/* d1 இன் ஒவ்வொரு நியதிக்கும் (criteria index) எந்த உள்ளீட்டு முறை என்பதை
+   தீர்மானித்தல்: 'count' = மொத்தம்/அடைந்தோர் எண்ணிக்கை, 'percent' = நேரடி
+   சராசரி %, 'manual' = ஏனைய துறைகளைப் போன்ற கைமுறை 1-6 புள்ளி தெரிவு. */
+function d1IndicatorMode(cIdx){
+  if(cIdx===2) return 'percent';
+  if(cIdx===4) return 'manual';
+  return 'count';
+}
+
+/* ஒவ்வொரு துறையின் நியதிக்குள் உள்ள ஒவ்வொரு சுட்டிக்கும் அதிகாரப்பூர்வ
+   வழிகாட்டியில் உள்ளபடியான உப பிரிவு இலக்கம். d1 இல் மட்டும் PDF-இன் இரு
+   இடங்களில் (1.2.2.7 மற்றும் 1.2.2.13/14/15) பல சுட்டிகள் ஒரே இலக்கத்தை
+   அல்லது தொடர் இலக்கங்களைப் பகிர்கின்றன — அதே PDF உரையைப் பிரதிபலிக்கும்
+   வண்ணம் அப்படியே காட்டப்பட்டுள்ளது. */
+var IND_NUMBERS = {
+  d1: [
+    ['1.1.1.1','1.1.1.2','1.1.1.3'],
+    ['1.1.2.1','1.2.1.1','1.2.1.2','1.2.1.3','1.2.1.4','1.2.1.5','1.2.1.6'],
+    ['1.2.2.1','1.2.2.2','1.2.2.3','1.2.2.4','1.2.2.5','1.2.2.6','1.2.2.7','1.2.2.7','1.2.2.7','1.2.2.8','1.2.2.9','1.2.2.10','1.2.2.11','1.2.2.12','1.2.2.13, 1.2.2.14, 1.2.2.15'],
+    ['1.2.3.1','1.2.3.2','1.2.3.3'],
+    ['1.2.4.1','1.2.4.2','1.2.4.3','1.2.4.4','1.2.4.5','1.2.4.6','1.2.4.7']
+  ],
+  d2: [
+    ['2.1.1','2.1.2','2.1.3','2.1.4','2.1.5','2.1.6','2.1.7','2.1.8','2.1.9'],
+    ['2.2.1','2.2.2','2.2.3','2.2.4','2.2.5','2.2.6','2.2.7','2.2.8','2.2.9'],
+    ['2.3.1','2.3.2','2.3.3','2.3.4'],
+    ['2.4.1','2.4.2','2.4.3','2.4.4','2.4.5','2.4.6','2.4.7','2.4.8']
+  ],
+  d3: [
+    ['3.1.1','3.1.2'],
+    ['3.2.1','3.2.2','3.2.3'],
+    ['3.3.1','3.3.2','3.3.3','3.3.4'],
+    ['3.4.1','3.4.2','3.4.3'],
+    ['3.5.1','3.5.2','3.5.3'],
+    ['3.6.1','3.6.2'],
+    ['3.7.1','3.7.2','3.7.3','3.7.4'],
+    ['3.8.1','3.8.2','3.8.3','3.8.4']
+  ],
+  d4: [
+    ['4.1.1','4.1.2'],
+    ['4.2.1','4.2.2','4.2.3','4.2.4'],
+    ['4.3.1','4.3.2'],
+    ['4.4.1','4.4.2','4.4.3','4.4.4'],
+    ['4.5.1','4.5.2']
+  ],
+  d5: [
+    ['5.1.1','5.1.2','5.1.3'],
+    ['5.2.1','5.2.2'],
+    ['5.3.1','5.3.2'],
+    ['5.4.1','5.4.2'],
+    ['5.5.1','5.5.2','5.5.3'],
+    ['5.6.1','5.6.2','5.6.3'],
+    ['5.7.1','5.7.2','5.7.3'],
+    ['5.8.1','5.8.2'],
+    ['5.9.1','5.9.2']
+  ],
+  d6: [
+    ['6.1.1','6.1.2'],
+    ['6.2.1','6.2.2','6.2.3','6.2.4','6.2.5'],
+    ['6.3.1','6.3.2'],
+    ['6.4.1','6.4.2','6.4.3'],
+    ['6.5.1','6.5.2'],
+    ['6.6.1','6.6.2'],
+    ['6.7.1','6.7.2','6.7.3','6.7.4'],
+    ['6.8.1','6.8.2','6.8.3','6.8.4'],
+    ['6.9.1','6.9.2'],
+    ['6.10.1','6.10.2','6.10.3','6.10.4'],
+    ['6.11.1','6.11.2'],
+    ['6.12.1','6.12.2','6.12.3'],
+    ['6.13.1','6.13.2','6.13.3'],
+    ['6.14.1','6.14.2'],
+    ['6.15.1','6.15.2'],
+    ['6.16.1','6.16.2','6.16.3']
+  ],
+  d7: [
+    ['7.1.1','7.1.2','7.1.3'],
+    ['7.2.1','7.2.2','7.2.3','7.2.4'],
+    ['7.3.1','7.3.2'],
+    ['7.4.1','7.4.2'],
+    ['7.5.1','7.5.2','7.5.3'],
+    ['7.6.1','7.6.2','7.6.3','7.6.4'],
+    ['7.7.1','7.7.2','7.7.3','7.7.4'],
+    ['7.8.1','7.8.2','7.8.3','7.8.4']
+  ],
+  d8: [
+    ['8.1.1','8.1.2','8.1.3'],
+    ['8.2.1','8.2.2'],
+    ['8.3.1','8.3.2','8.3.3'],
+    ['8.4.1','8.4.2','8.4.3'],
+    ['8.5.1','8.5.2']
+  ]
+};
+function numberFor(deptId, cIdx, iIdx){
+  var arr = IND_NUMBERS[deptId];
+  return (arr && arr[cIdx] && arr[cIdx][iIdx]) ? arr[cIdx][iIdx] : null;
 }
 
 function deptById(id){ for(var i=0;i<DEPARTMENTS.length;i++) if(DEPARTMENTS[i].id===id) return DEPARTMENTS[i]; return null; }
@@ -720,6 +835,15 @@ function computeDeptStats(deptId){
   return {total:total, scored:scored, percent:percent, grade:grade};
 }
 
+function refreshDeptStatsUI(deptId){
+  var stats = computeDeptStats(deptId);
+  var grade = stats.grade;
+  var pEl = document.getElementById('deptStatPercent'); if(pEl) pEl.textContent = stats.percent!=null ? stats.percent+'%' : '—';
+  var sEl = document.getElementById('deptStatScored'); if(sEl) sEl.textContent = stats.scored+'/'+stats.total;
+  var bEl = document.getElementById('deptStatBadge');
+  if(bEl){ bEl.textContent = grade ? grade.label : 'தொடங்கவில்லை'; bEl.className = 'badge '+(grade?grade.cls:''); }
+}
+
 function computeSchoolStats(){
   var percents=[];
   DEPARTMENTS.forEach(function(d){
@@ -773,6 +897,22 @@ function deptDocSizeChars(deptId){
 /* ---------------- Firestore data layer ---------------- */
 
 function saveTimers(){ return saveTimers._t || (saveTimers._t = {}); }
+/* ---------------- multi-school Firestore paths ----------------
+   state.schoolId===null means the original school (kept on the old
+   top-level paths so it is completely untouched by this feature).
+   Any school created via the Super Admin console gets a real id and
+   lives fully isolated under schools/{schoolId}/... instead. */
+function deptDocRef(deptId){
+  return state.schoolId
+    ? db.collection('schools').doc(state.schoolId).collection('departments').doc(deptId)
+    : db.collection('departments').doc(deptId);
+}
+function schoolConfigDocRef(){
+  return state.schoolId
+    ? db.collection('schools').doc(state.schoolId).collection('config').doc('school')
+    : db.collection('config').doc('school');
+}
+
 function scheduleSaveDept(deptId){
   var size = deptDocSizeChars(deptId);
   if(size > MAX_DEPT_DOC_CHARS){
@@ -782,7 +922,7 @@ function scheduleSaveDept(deptId){
   setSaveStatus('சேமிக்கிறது…');
   clearTimeout(saveTimers()[deptId]);
   saveTimers()[deptId] = setTimeout(function(){
-    db.collection('departments').doc(deptId).set(state.deptData[deptId]).then(function(){
+    deptDocRef(deptId).set(state.deptData[deptId]).then(function(){
       setSaveStatus('சேமிக்கப்பட்டது ✓');
     }).catch(function(err){
       var msg = err && err.message ? err.message : '';
@@ -801,14 +941,14 @@ function setSaveStatus(text){
 
 function subscribeDept(deptId, onChange){
   if(state.deptUnsub[deptId]) return;
-  state.deptUnsub[deptId] = db.collection('departments').doc(deptId).onSnapshot(function(snap){
+  state.deptUnsub[deptId] = deptDocRef(deptId).onSnapshot(function(snap){
     delete state.deptErrors[deptId];
     if(snap.metadata.hasPendingWrites) return; // our own optimistic write echoing back
     if(snap.exists){
       state.deptData[deptId] = migrateDeptData(snap.data());
     } else {
       state.deptData[deptId] = buildEmptyDeptData(deptId);
-      db.collection('departments').doc(deptId).set(state.deptData[deptId]).catch(function(){});
+      deptDocRef(deptId).set(state.deptData[deptId]).catch(function(){});
     }
     if(onChange) onChange();
   }, function(err){
@@ -826,7 +966,7 @@ function unsubscribeAllDepts(){
 
 function subscribeSchoolMeta(onChange){
   if(state.schoolUnsub) return;
-  state.schoolUnsub = db.collection('config').doc('school').onSnapshot(function(snap){
+  state.schoolUnsub = schoolConfigDocRef().onSnapshot(function(snap){
     if(snap.exists){ state.school = snap.data(); }
     if(onChange) onChange();
   });
@@ -842,20 +982,26 @@ function getSecondaryApp(){
   return secondaryApp;
 }
 
-function fetchRole(uid){
+function fetchUserMeta(uid){
   return db.collection('users').doc(uid).get().then(function(doc){
-    return doc.exists ? doc.data().role : null;
+    return doc.exists ? doc.data() : null;
   });
 }
 
 function routeAfterAuth(){
   if(!state.user){ state.view='login'; renderApp(); return; }
-  fetchRole(state.user.uid).then(function(role){
-    state.role = role;
-    if(!role){ state.view='noRole'; renderApp(); return; }
+  fetchUserMeta(state.user.uid).then(function(meta){
+    state.role = meta ? meta.role : null;
+    state.schoolId = meta ? (meta.schoolId || null) : null;
+    /* fresh sign-in (or a different school on a shared computer) —
+       never let a previous school's cached data flash on screen */
+    state.deptData = {};
+    state.school = {name:'', year:String(new Date().getFullYear())};
+    if(!state.role){ state.view='noRole'; renderApp(); return; }
+    if(state.role==='superadmin'){ state.view='superadmin'; renderApp(); return; }
     subscribeSchoolMeta(function(){ if(state.view==='admin') renderApp(); });
-    if(role==='admin'){ state.view='admin'; renderApp(); }
-    else if(deptById(role)){ state.currentDept=role; state.view='dept'; subscribeDept(role, function(){ if(state.view==='dept'&&!isTypingInApp()) renderApp(); }); renderApp(); }
+    if(state.role==='admin'){ state.view='admin'; renderApp(); }
+    else if(deptById(state.role)){ state.currentDept=state.role; state.view='dept'; subscribeDept(state.role, function(){ if(state.view==='dept'&&!isTypingInApp()) renderApp(); }); renderApp(); }
     else { state.view='noRole'; renderApp(); }
   });
 }
@@ -873,6 +1019,7 @@ function renderApp(){
   if(state.view==='admin') return renderAdminOverview(app);
   if(state.view==='setup') return renderSchoolSetup(app);
   if(state.view==='report') return renderEvidenceReport(app, state.reportScope);
+  if(state.view==='superadmin') return renderSuperAdmin(app);
 }
 
 function renderSetupNeeded(app){
@@ -1004,29 +1151,56 @@ function entryRowHtml(entry){
   '</div>';
 }
 
-function indicatorRowHtml(ind, idx){
+function qtyControlsHtml(ind, mode){
+  var qty = ind.qty || {};
+  var pointTxt = (ind.score && ind.score>0) ? SCORE_LABELS[ind.score] : 'மதிப்பிடப்படவில்லை';
+  if(mode==='percent'){
+    var pctVal = (qty.pct!=null) ? qty.pct : '';
+    return '<div class="ind-qty">'+
+      '<div class="field small" style="margin-bottom:0"><label>சராசரி நூற்றுவீதம் (%)</label>'+
+        '<input type="number" min="0" max="100" step="0.1" data-role="qpctinput" value="'+escapeHtml(String(pctVal))+'"></div>'+
+      '<div class="qty-result"><span class="badge" data-role="qpoint">'+escapeHtml(pointTxt)+'</span></div>'+
+    '</div>';
+  }
+  var total = (qty.total!=null) ? qty.total : '';
+  var achieved = (qty.achieved!=null) ? qty.achieved : '';
+  var pct = (qty.total>0 && qty.achieved!=null && !isNaN(qty.achieved)) ? Math.round((qty.achieved/qty.total)*100) : null;
+  return '<div class="ind-qty">'+
+    '<div class="field small" style="margin-bottom:0"><label>மொத்த எண்ணிக்கை</label><input type="number" min="0" data-role="qtotal" value="'+escapeHtml(String(total))+'"></div>'+
+    '<div class="field small" style="margin-bottom:0"><label>அடைந்தோர் எண்ணிக்கை</label><input type="number" min="0" data-role="qachieved" value="'+escapeHtml(String(achieved))+'"></div>'+
+    '<div class="qty-result"><span data-role="qpct">'+(pct!=null?pct+'%':'—')+'</span> · <span class="badge" data-role="qpoint">'+escapeHtml(pointTxt)+'</span></div>'+
+  '</div>';
+}
+
+function indicatorRowHtml(ind, idx, mode, noEvidence, numLabel){
   var entries = ind.entries || [];
+  var controlsHtml = (mode==='count'||mode==='percent')
+    ? qtyControlsHtml(ind, mode)
+    : '<div class="ind-controls"><select class="ind-score" data-role="score">'+scoreSelectHtml(ind.score)+'</select></div>';
+  var evidenceHtml = noEvidence ? '' :
+    '<div class="entries-list">'+entries.map(entryRowHtml).join('')+'</div>'+
+    (entries.length ? '' : '<p class="hint" style="margin:2px 0 8px">இதுவரை பதிவுகள் இல்லை — வெவ்வேறு திகதிகளில் நடந்த சான்றுகளை (எ.கா. வெவ்வேறு வகுப்பறை தரவட்டங்கள்) தனித்தனியாகச் சேர்க்கலாம்.</p>')+
+    '<button type="button" class="btn-outline small" data-role="addentry">+ புதிய பதிவு சேர் (திகதியுடன்)</button>';
   return '<div class="ind-row" data-ind="'+ind.id+'">'+
-    '<div class="ind-num">'+(idx+1)+'</div>'+
+    '<div class="ind-num'+(numLabel?' wide':'')+'">'+escapeHtml(numLabel||String(idx+1))+'</div>'+
     '<div class="ind-main">'+
       '<input class="ind-title" type="text" data-role="title" value="'+escapeHtml(ind.title)+'" placeholder="சுட்டியின் விபரம்">'+
-      '<div class="ind-controls">'+
-        '<select class="ind-score" data-role="score">'+scoreSelectHtml(ind.score)+'</select>'+
-      '</div>'+
-      '<div class="entries-list">'+entries.map(entryRowHtml).join('')+'</div>'+
-      '<button type="button" class="btn-outline small" data-role="addentry">+ புதிய பதிவு சேர் (திகதியுடன்)</button>'+
+      controlsHtml+
+      evidenceHtml+
     '</div>'+
   '</div>';
 }
 
-function criterionHtml(c, cIdx, isAdmin){
+function criterionHtml(c, cIdx, isAdmin, deptId){
+  var mode = null, noEvidence = false;
+  if(deptId==='d1'){ mode = d1IndicatorMode(cIdx); noEvidence = true; }
   return '<section class="criterion" data-crit="'+c.id+'">'+
     '<div class="criterion-head">'+
       '<span class="crit-num">நியதி '+(cIdx+1)+'</span>'+
       '<input class="crit-title" type="text" data-role="ctitle" value="'+escapeHtml(c.title)+'">'+
       (isAdmin ? '<button type="button" class="btn-tiny" data-role="printcrit" title="இந்த நியதியை மட்டும் PDF ஆக பதிவிறக்கு">நியதி PDF</button>' : '')+
     '</div>'+
-    '<div class="ind-list">'+c.indicators.map(function(ind,i){ return indicatorRowHtml(ind,i); }).join('')+'</div>'+
+    '<div class="ind-list">'+c.indicators.map(function(ind,i){ return indicatorRowHtml(ind,i,mode,noEvidence,numberFor(deptId,cIdx,i)); }).join('')+'</div>'+
   '</section>';
 }
 
@@ -1054,13 +1228,13 @@ function renderDeptView(app, deptId, opts){
     '<div class="dept-header">'+
       '<h1>'+escapeHtml(dept.name)+'</h1>'+
       '<p class="dept-sub">'+dept.en+'</p>'+
-      '<div class="stat-row">'+
-        '<div class="stat-box"><span class="stat-num">'+(stats.percent!=null?stats.percent+'%':'—')+'</span><span class="stat-label">அடைந்த சதவீதம்</span></div>'+
-        '<div class="stat-box"><span class="stat-num">'+stats.scored+'/'+stats.total+'</span><span class="stat-label">மதிப்பிடப்பட்ட சுட்டிகள்</span></div>'+
-        '<div class="stat-box"><span class="badge '+(grade?grade.cls:'')+'">'+(grade?grade.label:'தொடங்கவில்லை')+'</span></div>'+
+      '<div class="stat-row" id="deptStatRow">'+
+        '<div class="stat-box"><span class="stat-num" id="deptStatPercent">'+(stats.percent!=null?stats.percent+'%':'—')+'</span><span class="stat-label">அடைந்த சதவீதம்</span></div>'+
+        '<div class="stat-box"><span class="stat-num" id="deptStatScored">'+stats.scored+'/'+stats.total+'</span><span class="stat-label">மதிப்பிடப்பட்ட சுட்டிகள்</span></div>'+
+        '<div class="stat-box"><span class="badge '+(grade?grade.cls:'')+'" id="deptStatBadge">'+(grade?grade.label:'தொடங்கவில்லை')+'</span></div>'+
       '</div>'+
     '</div>'+
-    '<div class="criteria-list" id="criteriaList">'+dData.criteria.map(function(c,i){ return criterionHtml(c,i,!!opts.admin); }).join('')+'</div>'+
+    '<div class="criteria-list" id="criteriaList">'+dData.criteria.map(function(c,i){ return criterionHtml(c,i,!!opts.admin,deptId); }).join('')+'</div>'+
     '<div class="reflect-box">'+
       '<label>இந்தத் துறை தொடர்பான கலந்துரையாடல் குறிப்புகள்</label>'+
       '<textarea id="deptNote" placeholder="கலந்துரையாடலில் எழுந்த முக்கிய கருத்துகளை இங்கு பதிவு செய்யவும்">'+escapeHtml(dData.note||'')+'</textarea>'+
@@ -1104,16 +1278,53 @@ function renderDeptView(app, deptId, opts){
       if(!ind.entries) ind.entries = [];
 
       rowEl.querySelector('[data-role="title"]').oninput=function(e){ ind.title=e.target.value; scheduleSaveDept(deptId); };
-      rowEl.querySelector('[data-role="score"]').onchange=function(e){
-        ind.score=parseInt(e.target.value,10)||0;
-        scheduleSaveDept(deptId);
-        renderDeptView(app, deptId, opts);
-      };
-      rowEl.querySelector('[data-role="addentry"]').onclick=function(){
-        ind.entries.push({id:uid(), date:todayStr(), note:'', imageData:null, imageName:null});
-        scheduleSaveDept(deptId);
-        renderDeptView(app, deptId, opts);
-      };
+      var scoreSel = rowEl.querySelector('[data-role="score"]');
+      if(scoreSel){
+        scoreSel.onchange=function(e){
+          ind.score=parseInt(e.target.value,10)||0;
+          scheduleSaveDept(deptId);
+          renderDeptView(app, deptId, opts);
+        };
+      }
+      var qTotalEl = rowEl.querySelector('[data-role="qtotal"]');
+      var qAchievedEl = rowEl.querySelector('[data-role="qachieved"]');
+      if(qTotalEl && qAchievedEl){
+        var recomputeCount = function(){
+          var t = qTotalEl.value===''? null : parseFloat(qTotalEl.value);
+          var a = qAchievedEl.value===''? null : parseFloat(qAchievedEl.value);
+          if(t!=null && isNaN(t)) t=null;
+          if(a!=null && isNaN(a)) a=null;
+          ind.qty = {total:t, achieved:a};
+          var pct = (t>0 && a!=null) ? Math.round((a/t)*100) : null;
+          ind.score = pct!=null ? pointFromPercent(pct) : 0;
+          var pctSpan = rowEl.querySelector('[data-role="qpct"]'); if(pctSpan) pctSpan.textContent = pct!=null ? pct+'%' : '—';
+          var pointSpan = rowEl.querySelector('[data-role="qpoint"]'); if(pointSpan) pointSpan.textContent = ind.score ? SCORE_LABELS[ind.score] : 'மதிப்பிடப்படவில்லை';
+          scheduleSaveDept(deptId);
+          refreshDeptStatsUI(deptId);
+        };
+        qTotalEl.oninput = recomputeCount;
+        qAchievedEl.oninput = recomputeCount;
+      }
+      var qPctEl = rowEl.querySelector('[data-role="qpctinput"]');
+      if(qPctEl){
+        qPctEl.oninput = function(){
+          var v = qPctEl.value===''? null : parseFloat(qPctEl.value);
+          if(v!=null && isNaN(v)) v=null;
+          ind.qty = {pct:v};
+          ind.score = (v!=null) ? pointFromPercent(v) : 0;
+          var pointSpan = rowEl.querySelector('[data-role="qpoint"]'); if(pointSpan) pointSpan.textContent = ind.score ? SCORE_LABELS[ind.score] : 'மதிப்பிடப்படவில்லை';
+          scheduleSaveDept(deptId);
+          refreshDeptStatsUI(deptId);
+        };
+      }
+      var addEntryBtn = rowEl.querySelector('[data-role="addentry"]');
+      if(addEntryBtn){
+        addEntryBtn.onclick=function(){
+          ind.entries.push({id:uid(), date:todayStr(), note:'', imageData:null, imageName:null});
+          scheduleSaveDept(deptId);
+          renderDeptView(app, deptId, opts);
+        };
+      }
 
       rowEl.querySelectorAll('.entry-row').forEach(function(entryEl){
         var entryId = entryEl.getAttribute('data-entry');
@@ -1218,8 +1429,23 @@ function renderAdminOverview(app){
 
 /* ---- school setup / user management ---- */
 
-function reportIndicatorHtml(ind){
+function reportIndicatorHtml(ind, numLabel){
   var scoreTxt = (ind.score && ind.score>0) ? SCORE_LABELS[ind.score] : 'மதிப்பிடப்படவில்லை';
+  var numPrefix = numLabel ? escapeHtml(numLabel)+' — ' : '';
+  if(ind.qty){
+    var qtySummary;
+    if(ind.qty.pct!=null){
+      qtySummary = 'சராசரி நூற்றுவீதம்: '+ind.qty.pct+'%';
+    } else {
+      var pct2 = (ind.qty.total>0 && ind.qty.achieved!=null) ? Math.round((ind.qty.achieved/ind.qty.total)*100) : null;
+      qtySummary = 'மொத்தம்: '+(ind.qty.total!=null?ind.qty.total:'—')+' · அடைந்தோர்: '+(ind.qty.achieved!=null?ind.qty.achieved:'—')+' · நூற்றுவீதம்: '+(pct2!=null?pct2+'%':'—');
+    }
+    return '<div class="report-ind">'+
+      '<div class="report-ind-title">'+numPrefix+escapeHtml(ind.title)+'</div>'+
+      '<div class="report-ind-note">'+escapeHtml(qtySummary)+'</div>'+
+      '<div class="badge small" style="margin-top:6px">'+escapeHtml(scoreTxt)+'</div>'+
+    '</div>';
+  }
   var entries = (ind.entries || []).slice().sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
   var entriesHtml = entries.length ? entries.map(function(e){
     var img = e.imageData
@@ -1233,7 +1459,7 @@ function reportIndicatorHtml(ind){
     '</div>';
   }).join('') : '<p class="hint">இதுவரை எந்தப் பதிவும் இடப்படவில்லை.</p>';
   return '<div class="report-ind">'+
-    '<div class="report-ind-title">'+escapeHtml(ind.title)+'</div>'+
+    '<div class="report-ind-title">'+numPrefix+escapeHtml(ind.title)+'</div>'+
     '<div class="badge small" style="margin-bottom:8px">'+escapeHtml(scoreTxt)+'</div>'+
     entriesHtml+
   '</div>';
@@ -1246,7 +1472,7 @@ function reportDeptHtml(deptId){
   var body = dData.criteria.map(function(c, i){
     return '<div class="report-crit-block">'+
       '<div class="report-crit-title">நியதி '+(i+1)+' — '+escapeHtml(c.title)+'</div>'+
-      c.indicators.map(reportIndicatorHtml).join('')+
+      c.indicators.map(function(ind,j){ return reportIndicatorHtml(ind,numberFor(deptId,i,j)); }).join('')+
     '</div>';
   }).join('');
   return '<section style="margin-bottom:34px">'+
@@ -1266,7 +1492,7 @@ function reportSingleCritHtml(deptId, critId){
     '<h2 style="color:var(--maroon-deep)">'+escapeHtml(dept.name)+'</h2>'+
     '<div class="report-crit-block">'+
       '<div class="report-crit-title">நியதி '+(idx+1)+' — '+escapeHtml(c.title)+'</div>'+
-      c.indicators.map(reportIndicatorHtml).join('')+
+      c.indicators.map(function(ind,j){ return reportIndicatorHtml(ind,numberFor(deptId,idx,j)); }).join('')+
     '</div>'+
   '</section>';
 }
@@ -1294,7 +1520,7 @@ function renderEvidenceReport(app, scope){
       '<button class="btn-outline no-print" id="btnPrintReport">PDF ஆக பதிவிறக்கு (Print → Save as PDF)</button> '+
       '<button class="btn-ghost no-print" id="btnBackReport">← திரும்பு</button>'
     ) +
-    '<div class="report-print-header" style="text-align:center;color:var(--ink-soft);font-size:.85rem;margin-bottom:10px">'+escapeHtml(subtitle)+' · '+escapeHtml(todayStr)+'</div>'+
+     '<div class="report-print-header" style="text-align:center;color:var(--ink-soft);font-size:.85rem;margin-bottom:10px">'+escapeHtml(subtitle)+' · '+escapeHtml(todayStr)+'</div>'+
     '<div class="setup-notice no-print">இந்தப் பக்கத்தை PDF கோப்பாகச் சேமிக்க, மேலே உள்ள பொத்தானை அழுத்தி, திறக்கும் Print சாளரத்தில் "Destination" இல் <strong>Save as PDF</strong> ஐத் தேர்ந்தெடுத்து Save செய்யவும்.</div>'+
     '<div id="reportBody">'+bodyHtml+'</div>'+
     '<footer class="app-footer">பாடசாலைக் கல்விப் பண்புத்தர மதிப்பீட்டு சான்று அறிக்கை.</footer>';
@@ -1370,7 +1596,7 @@ function renderSchoolSetup(app){
   document.getElementById('btnBackAdmin').onclick=function(){ state.view='admin'; renderApp(); };
 
   function saveSchoolMeta(){
-    db.collection('config').doc('school').set(school).then(function(){
+    schoolConfigDocRef().set(school).then(function(){
       setSaveStatus('சேமிக்கப்பட்டது ✓');
     }).catch(function(err){ setSaveStatus('சேமிப்பில் சிக்கல்: '+err.message); });
     var t=document.querySelector('.brand-title'); if(t) t.textContent=school.name||'';
@@ -1399,7 +1625,11 @@ function renderSchoolSetup(app){
   function loadUsers(){
     db.collection('users').get().then(function(snap){
       var rows = [];
-      snap.forEach(function(doc){ rows.push({uid:doc.id, email:doc.data().email, role:doc.data().role}); });
+      snap.forEach(function(doc){
+        var d = doc.data();
+        var belongsHere = state.schoolId ? (d.schoolId===state.schoolId) : !d.schoolId;
+        if(belongsHere) rows.push({uid:doc.id, email:d.email, role:d.role});
+      });
       state.usersCache = rows;
       renderUsersTable();
     }).catch(function(err){
@@ -1463,7 +1693,7 @@ function renderSchoolSetup(app){
     var secAuth = sec.auth();
     secAuth.createUserWithEmailAndPassword(email, pass).then(function(cred){
       var newUid = cred.user.uid;
-      return db.collection('users').doc(newUid).set({email:email, role:role}).then(function(){
+      return db.collection('users').doc(newUid).set({email:email, role:role, schoolId: state.schoolId || null}).then(function(){
         return secAuth.signOut();
       });
     }).then(function(){
@@ -1474,6 +1704,93 @@ function renderSchoolSetup(app){
   };
 
   loadUsers();
+}
+
+/* ---------------- Super Admin: create & manage schools ---------------- */
+
+function renderSuperAdmin(app){
+  app.innerHTML =
+    topbarHtml('<button class="btn-ghost" id="btnSaLogout">← வெளியேறு</button>') +
+    '<div class="dept-header"><h1>Super Admin — பாடசாலைகள் மேலாண்மை</h1>'+
+    '<p class="dept-sub">புதிய பாடசாலையை உருவாக்கி, அதன் அதிபருக்கான மின்னஞ்சல்/கடவுச்சொல் உருவாக்கவும். ஒவ்வொரு பாடசாலையின் தரவும் முற்றிலும் தனித்தனியாகவே பேணப்படும்.</p></div>'+
+    '<div class="criterion">'+
+      '<div class="criterion-head"><span class="crit-num">புதிய பாடசாலையைச் சேர்</span></div>'+
+      '<div class="add-user-form">'+
+        '<div class="field"><label>பாடசாலையின் பெயர்</label><input type="text" id="saSchoolName" placeholder="எ.கா. St. Joseph\'s College, Colombo"></div>'+
+        '<div class="field"><label>அதிபரின் மின்னஞ்சல்</label><input type="text" id="saEmail" placeholder="principal@school.lk"></div>'+
+        '<div class="field"><label>தற்காலிகக் கடவுச்சொல்</label><input type="text" id="saPass" placeholder="6+ எழுத்துகள்"></div>'+
+        '<button class="btn-primary" id="btnSaCreate">பாடசாலையை உருவாக்கு</button>'+
+      '</div>'+
+      '<div class="error-msg" id="saErr"></div>'+
+      '<div class="setup-notice" id="saSuccess" style="display:none"></div>'+
+    '</div>'+
+    '<table class="setup-table"><thead><tr><th>பாடசாலை</th><th>அதிபர் மின்னஞ்சல்</th><th>உருவாக்கப்பட்ட திகதி</th></tr></thead>'+
+    '<tbody id="schoolsTbody"><tr><td colspan="3" style="color:var(--ink-soft)">ஏற்றப்படுகிறது…</td></tr></tbody></table>'+
+    '<footer class="app-footer">புதிதாக உருவாக்கிய மின்னஞ்சல் மற்றும் தற்காலிகக் கடவுச்சொல்லை அந்தந்தப் பாடசாலை அதிபரிடம் நேரடியாக வழங்கவும்.</footer>';
+
+  document.getElementById('btnSaLogout').onclick=function(){ auth.signOut(); };
+
+  function loadSchools(){
+    db.collection('schools').get().then(function(snap){
+      var schools = [];
+      snap.forEach(function(doc){ schools.push({id:doc.id, name:doc.data().name||'', createdAt:doc.data().createdAt||''}); });
+      db.collection('users').where('role','==','admin').get().then(function(usnap){
+        var adminBySchool = {};
+        usnap.forEach(function(doc){ var d=doc.data(); if(d.schoolId) adminBySchool[d.schoolId]=d.email; });
+        state.schoolsCache = schools.map(function(s){ return {id:s.id, name:s.name, createdAt:s.createdAt, adminEmail:adminBySchool[s.id]||'—'}; });
+        renderSchoolsTable();
+      });
+    }).catch(function(err){
+      document.getElementById('schoolsTbody').innerHTML = '<tr><td colspan="3" style="color:var(--rust)">'+escapeHtml(err.message)+'</td></tr>';
+    });
+  }
+
+  function renderSchoolsTable(){
+    var tbody = document.getElementById('schoolsTbody');
+    if(!state.schoolsCache.length){
+      tbody.innerHTML = '<tr><td colspan="3" style="color:var(--ink-soft)">இதுவரை பாடசாலைகள் யாவும் சேர்க்கப்படவில்லை.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = state.schoolsCache.map(function(s){
+      return '<tr>'+
+        '<td>'+escapeHtml(s.name)+'</td>'+
+        '<td>'+escapeHtml(s.adminEmail)+'</td>'+
+        '<td>'+escapeHtml((s.createdAt||'').slice(0,10))+'</td>'+
+      '</tr>';
+    }).join('');
+  }
+
+  document.getElementById('btnSaCreate').onclick=function(){
+    var name = document.getElementById('saSchoolName').value.trim();
+    var email = document.getElementById('saEmail').value.trim();
+    var pass = document.getElementById('saPass').value;
+    var errEl = document.getElementById('saErr');
+    var okEl = document.getElementById('saSuccess');
+    errEl.textContent=''; okEl.style.display='none';
+    if(!name){ errEl.textContent='பாடசாலையின் பெயரை இட்டு நிரப்பவும்.'; return; }
+    if(!email || !pass){ errEl.textContent='மின்னஞ்சலும் கடவுச்சொல்லும் இட்டு நிரப்பவும்.'; return; }
+    if(pass.length<6){ errEl.textContent='கடவுச்சொல் 6 எழுத்துகளுக்கு மேல் இருக்க வேண்டும்.'; return; }
+    var schoolId = db.collection('schools').doc().id;
+    db.collection('schools').doc(schoolId).set({name:name, year:String(new Date().getFullYear()), logoData:null, createdAt:new Date().toISOString()}).then(function(){
+      var sec = getSecondaryApp();
+      var secAuth = sec.auth();
+      return secAuth.createUserWithEmailAndPassword(email, pass).then(function(cred){
+        var newUid = cred.user.uid;
+        return db.collection('users').doc(newUid).set({email:email, role:'admin', schoolId:schoolId}).then(function(){
+          return secAuth.signOut();
+        });
+      });
+    }).then(function(){
+      document.getElementById('saSchoolName').value='';
+      document.getElementById('saEmail').value='';
+      document.getElementById('saPass').value='';
+      okEl.style.display='block';
+      okEl.textContent = '"'+name+'" உருவாக்கப்பட்டது. உள்நுழைவு விபரங்களை ('+email+') அதிபரிடம் வழங்கவும்.';
+      loadSchools();
+    }).catch(function(err){ errEl.textContent = friendlyAuthError(err); });
+  };
+
+  loadSchools();
 }
 
 /* ---------------- boot ---------------- */
@@ -1543,9 +1860,4 @@ if('serviceWorker' in navigator){
     navigator.serviceWorker.register('sw.js').catch(function(){ /* fine if this fails, e.g. opened via file:// */ });
   });
 }
-
-})();
-
-</script>
-</body>
-</html>
+})(); </script> </body> </html>
