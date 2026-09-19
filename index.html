@@ -1771,7 +1771,10 @@ function renderSuperAdmin(app){
     if(!email || !pass){ errEl.textContent='மின்னஞ்சலும் கடவுச்சொல்லும் இட்டு நிரப்பவும்.'; return; }
     if(pass.length<6){ errEl.textContent='கடவுச்சொல் 6 எழுத்துகளுக்கு மேல் இருக்க வேண்டும்.'; return; }
     var schoolId = db.collection('schools').doc().id;
-    db.collection('schools').doc(schoolId).set({name:name, year:String(new Date().getFullYear()), logoData:null, createdAt:new Date().toISOString()}).then(function(){
+    var schoolMetaObj = {name:name, year:String(new Date().getFullYear()), logoData:null, createdAt:new Date().toISOString()};
+    db.collection('schools').doc(schoolId).set(schoolMetaObj).then(function(){
+      return db.collection('schools').doc(schoolId).collection('config').doc('school').set({name:schoolMetaObj.name, year:schoolMetaObj.year, logoData:null});
+    }).then(function(){
       var sec = getSecondaryApp();
       var secAuth = sec.auth();
       return secAuth.createUserWithEmailAndPassword(email, pass).then(function(cred){
