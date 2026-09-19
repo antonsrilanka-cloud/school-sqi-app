@@ -212,7 +212,7 @@
   .center-wrap .login-card input{ margin-bottom:2px; }
 
   /* ---- evidence / criteria report (printable) ---- */
-  .report-crit-block{ margin-bottom:26px; page-break-inside:avoid; }
+  .report-crit-block{ margin-bottom:26px; }
   .report-crit-title{ font-family:'Noto Serif Tamil',serif; font-weight:700; color:var(--maroon-deep); font-size:1.05rem; border-bottom:2px solid var(--gold); padding-bottom:6px; margin-bottom:12px; }
   .report-ind{ display:flex; flex-direction:column; align-items:stretch; gap:8px; border-top:1px dashed var(--line); padding:14px 0; page-break-inside:avoid; margin-bottom:6px; }
   .report-ind:first-child{ border-top:none; }
@@ -227,7 +227,7 @@
   @media print{
     @page{ size: A4; margin: 10mm; }
     .report-print-header{ display:block; text-align:center; margin-bottom:10px; }
-    .report-crit-block{ break-inside:avoid; }
+    .report-crit-title{ break-after:avoid; page-break-after:avoid; }
     .report-ind{ break-inside:avoid; }
     .report-entry{ break-inside:avoid; }
     footer.app-footer{ padding:6px 0 0; margin-top:10px; page-break-before:avoid; break-before:avoid; page-break-inside:avoid; break-inside:avoid; }
