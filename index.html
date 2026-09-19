@@ -988,6 +988,19 @@ function fetchUserMeta(uid){
   });
 }
 
+function checkSchoolAccess(schoolId){
+  // legacy (original) school has no schoolId, and is never date-restricted
+  if(!schoolId) return Promise.resolve(true);
+  return db.collection('schools').doc(schoolId).get().then(function(doc){
+    if(!doc.exists) return true;
+    var d = doc.data();
+    var today = todayStr();
+    if(d.accessStart && today < d.accessStart) { state.accessBlockReason = {start:d.accessStart, end:d.accessEnd, kind:'notStarted'}; return false; }
+    if(d.accessEnd && today > d.accessEnd) { state.accessBlockReason = {start:d.accessStart, end:d.accessEnd, kind:'ended'}; return false; }
+    return true;
+  }).catch(function(){ return true; }); // never hard-lock a school out due to a network hiccup
+}
+
 function routeAfterAuth(){
   if(!state.user){ state.view='login'; renderApp(); return; }
   fetchUserMeta(state.user.uid).then(function(meta){
@@ -999,10 +1012,13 @@ function routeAfterAuth(){
     state.school = {name:'', year:String(new Date().getFullYear())};
     if(!state.role){ state.view='noRole'; renderApp(); return; }
     if(state.role==='superadmin'){ state.view='superadmin'; renderApp(); return; }
-    subscribeSchoolMeta(function(){ if(state.view==='admin') renderApp(); });
-    if(state.role==='admin'){ state.view='admin'; renderApp(); }
-    else if(deptById(state.role)){ state.currentDept=state.role; state.view='dept'; subscribeDept(state.role, function(){ if(state.view==='dept'&&!isTypingInApp()) renderApp(); }); renderApp(); }
-    else { state.view='noRole'; renderApp(); }
+    checkSchoolAccess(state.schoolId).then(function(allowed){
+      if(!allowed){ state.view='accessBlocked'; renderApp(); return; }
+      subscribeSchoolMeta(function(){ if(state.view==='admin') renderApp(); });
+      if(state.role==='admin'){ state.view='admin'; renderApp(); }
+      else if(deptById(state.role)){ state.currentDept=state.role; state.view='dept'; subscribeDept(state.role, function(){ if(state.view==='dept'&&!isTypingInApp()) renderApp(); }); renderApp(); }
+      else { state.view='noRole'; renderApp(); }
+    });
   });
 }
 
@@ -1020,6 +1036,7 @@ function renderApp(){
   if(state.view==='setup') return renderSchoolSetup(app);
   if(state.view==='report') return renderEvidenceReport(app, state.reportScope);
   if(state.view==='superadmin') return renderSuperAdmin(app);
+  if(state.view==='accessBlocked') return renderAccessBlocked(app);
 }
 
 function renderSetupNeeded(app){
@@ -1709,69 +1726,182 @@ function renderSchoolSetup(app){
 /* ---------------- Super Admin: create & manage schools ---------------- */
 
 function renderSuperAdmin(app){
+  var editingSchoolId = null;
+
   app.innerHTML =
     topbarHtml('<button class="btn-ghost" id="btnSaLogout">← வெளியேறு</button>') +
     '<div class="dept-header"><h1>Super Admin — பாடசாலைகள் மேலாண்மை</h1>'+
     '<p class="dept-sub">புதிய பாடசாலையை உருவாக்கி, அதன் அதிபருக்கான மின்னஞ்சல்/கடவுச்சொல் உருவாக்கவும். ஒவ்வொரு பாடசாலையின் தரவும் முற்றிலும் தனித்தனியாகவே பேணப்படும்.</p></div>'+
     '<div class="criterion">'+
-      '<div class="criterion-head"><span class="crit-num">புதிய பாடசாலையைச் சேர்</span></div>'+
+      '<div class="criterion-head"><span class="crit-num" id="saFormTitle">புதிய பாடசாலையைச் சேர்</span></div>'+
       '<div class="add-user-form">'+
         '<div class="field"><label>பாடசாலையின் பெயர்</label><input type="text" id="saSchoolName" placeholder="எ.கா. St. Joseph\'s College, Colombo"></div>'+
+        '<div class="field"><label>அதிபரின் பெயர்</label><input type="text" id="saPrincipalName" placeholder="எ.கா. Mr. R. Antonraj"></div>'+
         '<div class="field"><label>அதிபரின் மின்னஞ்சல்</label><input type="text" id="saEmail" placeholder="principal@school.lk"></div>'+
-        '<div class="field"><label>தற்காலிகக் கடவுச்சொல்</label><input type="text" id="saPass" placeholder="6+ எழுத்துகள்"></div>'+
-        '<button class="btn-primary" id="btnSaCreate">பாடசாலையை உருவாக்கு</button>'+
+        '<div class="field" id="saPassField"><label>தற்காலிகக் கடவுச்சொல்</label><input type="text" id="saPass" placeholder="6+ எழுத்துகள்"></div>'+
+        '<div class="field"><label>அணுகல் தொடக்கத் திகதி (விருப்பம்)</label><input type="date" id="saAccessStart"></div>'+
+        '<div class="field"><label>அணுகல் முடிவுத் திகதி (விருப்பம்)</label><input type="date" id="saAccessEnd"></div>'+
+        '<button class="btn-primary" id="btnSaCreate">பாடசாலையை உருவாக்கு</button> '+
+        '<button class="btn-ghost" id="btnSaCancelEdit" style="display:none">ரத்துசெய்</button>'+
       '</div>'+
       '<div class="error-msg" id="saErr"></div>'+
       '<div class="setup-notice" id="saSuccess" style="display:none"></div>'+
+      '<div id="saEmailChangeBlock" style="display:none;margin-top:18px;border-top:1px dashed var(--line);padding-top:14px">'+
+        '<div class="crit-num" style="margin-bottom:8px">அதிபரின் உள்நுழைவு மின்னஞ்சலை மாற்று</div>'+
+        '<p class="hint">பாதுகாப்புக் காரணங்களுக்காக, மின்னஞ்சலை நேரடியாக மாற்ற முடியாது — அதற்குப் பதிலாக ஒரு புதிய உள்நுழைவைத் தயாரித்து, பழையதை நீக்கிவிடுவோம்.</p>'+
+        '<div class="add-user-form">'+
+          '<div class="field"><label>புதிய மின்னஞ்சல்</label><input type="text" id="saNewEmail" placeholder="new-principal@school.lk"></div>'+
+          '<div class="field"><label>புதிய தற்காலிகக் கடவுச்சொல்</label><input type="text" id="saNewPass" placeholder="6+ எழுத்துகள்"></div>'+
+          '<button class="btn-outline" id="btnSaChangeEmail">மின்னஞ்சலை மாற்று</button>'+
+        '</div>'+
+        '<div class="error-msg" id="saEmailErr"></div>'+
+      '</div>'+
     '</div>'+
-    '<table class="setup-table"><thead><tr><th>பாடசாலை</th><th>அதிபர் மின்னஞ்சல்</th><th>உருவாக்கப்பட்ட திகதி</th></tr></thead>'+
-    '<tbody id="schoolsTbody"><tr><td colspan="3" style="color:var(--ink-soft)">ஏற்றப்படுகிறது…</td></tr></tbody></table>'+
+    '<table class="setup-table"><thead><tr><th>பாடசாலை</th><th>அதிபர்</th><th>மின்னஞ்சல்</th><th>அணுகல் காலம்</th><th>உருவாக்கப்பட்ட திகதி</th><th></th></tr></thead>'+
+    '<tbody id="schoolsTbody"><tr><td colspan="6" style="color:var(--ink-soft)">ஏற்றப்படுகிறது…</td></tr></tbody></table>'+
     '<footer class="app-footer">புதிதாக உருவாக்கிய மின்னஞ்சல் மற்றும் தற்காலிகக் கடவுச்சொல்லை அந்தந்தப் பாடசாலை அதிபரிடம் நேரடியாக வழங்கவும்.</footer>';
 
   document.getElementById('btnSaLogout').onclick=function(){ auth.signOut(); };
 
+  function resetFormToCreateMode(){
+    editingSchoolId = null;
+    document.getElementById('saFormTitle').textContent = 'புதிய பாடசாலையைச் சேர்';
+    document.getElementById('saSchoolName').value='';
+    document.getElementById('saPrincipalName').value='';
+    document.getElementById('saEmail').value='';
+    document.getElementById('saEmail').disabled=false;
+    document.getElementById('saPass').value='';
+    document.getElementById('saAccessStart').value='';
+    document.getElementById('saAccessEnd').value='';
+    document.getElementById('saPassField').style.display='';
+    document.getElementById('btnSaCreate').textContent='பாடசாலையை உருவாக்கு';
+    document.getElementById('btnSaCancelEdit').style.display='none';
+    document.getElementById('saEmailChangeBlock').style.display='none';
+    document.getElementById('saErr').textContent='';
+  }
+
   function loadSchools(){
     db.collection('schools').get().then(function(snap){
       var schools = [];
-      snap.forEach(function(doc){ schools.push({id:doc.id, name:doc.data().name||'', createdAt:doc.data().createdAt||''}); });
+      snap.forEach(function(doc){ var d=doc.data(); schools.push({id:doc.id, name:d.name||'', createdAt:d.createdAt||'', accessStart:d.accessStart||'', accessEnd:d.accessEnd||''}); });
       db.collection('users').where('role','==','admin').get().then(function(usnap){
         var adminBySchool = {};
-        usnap.forEach(function(doc){ var d=doc.data(); if(d.schoolId) adminBySchool[d.schoolId]=d.email; });
-        state.schoolsCache = schools.map(function(s){ return {id:s.id, name:s.name, createdAt:s.createdAt, adminEmail:adminBySchool[s.id]||'—'}; });
+        usnap.forEach(function(doc){ var d=doc.data(); if(d.schoolId) adminBySchool[d.schoolId]={uid:doc.id, email:d.email, name:d.name||''}; });
+        state.schoolsCache = schools.map(function(s){
+          var admin = adminBySchool[s.id]||{};
+          return {id:s.id, name:s.name, createdAt:s.createdAt, accessStart:s.accessStart, accessEnd:s.accessEnd, adminUid:admin.uid||null, adminEmail:admin.email||'—', adminName:admin.name||''};
+        });
         renderSchoolsTable();
       });
     }).catch(function(err){
-      document.getElementById('schoolsTbody').innerHTML = '<tr><td colspan="3" style="color:var(--rust)">'+escapeHtml(err.message)+'</td></tr>';
+      document.getElementById('schoolsTbody').innerHTML = '<tr><td colspan="6" style="color:var(--rust)">'+escapeHtml(err.message)+'</td></tr>';
     });
+  }
+
+  function accessRangeText(s){
+    if(!s.accessStart && !s.accessEnd) return 'வரம்பு இல்லை';
+    return (s.accessStart||'—')+' முதல் '+(s.accessEnd||'—')+' வரை';
   }
 
   function renderSchoolsTable(){
     var tbody = document.getElementById('schoolsTbody');
     if(!state.schoolsCache.length){
-      tbody.innerHTML = '<tr><td colspan="3" style="color:var(--ink-soft)">இதுவரை பாடசாலைகள் யாவும் சேர்க்கப்படவில்லை.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" style="color:var(--ink-soft)">இதுவரை பாடசாலைகள் யாவும் சேர்க்கப்படவில்லை.</td></tr>';
       return;
     }
     tbody.innerHTML = state.schoolsCache.map(function(s){
-      return '<tr>'+
+      return '<tr data-school="'+s.id+'">'+
         '<td>'+escapeHtml(s.name)+'</td>'+
+        '<td>'+escapeHtml(s.adminName||'—')+'</td>'+
         '<td>'+escapeHtml(s.adminEmail)+'</td>'+
+        '<td>'+escapeHtml(accessRangeText(s))+'</td>'+
         '<td>'+escapeHtml((s.createdAt||'').slice(0,10))+'</td>'+
+        '<td><button type="button" class="btn-tiny" data-role="edit">தொகு</button> <button type="button" class="btn-tiny" data-role="del" style="color:var(--rust)">நீக்கு</button></td>'+
       '</tr>';
     }).join('');
+    tbody.querySelectorAll('tr').forEach(function(row){
+      var sid = row.getAttribute('data-school');
+      if(!sid) return;
+      var school = state.schoolsCache.filter(function(s){ return s.id===sid; })[0];
+      var editBtn = row.querySelector('[data-role="edit"]');
+      if(editBtn) editBtn.onclick=function(){ startEdit(school); };
+      var delBtn = row.querySelector('[data-role="del"]');
+      if(delBtn) delBtn.onclick=function(){ deleteSchool(school); };
+    });
   }
+
+  function startEdit(school){
+    editingSchoolId = school.id;
+    document.getElementById('saFormTitle').textContent = '"'+school.name+'" — திருத்து';
+    document.getElementById('saSchoolName').value = school.name||'';
+    document.getElementById('saPrincipalName').value = school.adminName||'';
+    document.getElementById('saEmail').value = school.adminEmail==='—' ? '' : school.adminEmail;
+    document.getElementById('saEmail').disabled = true;
+    document.getElementById('saAccessStart').value = school.accessStart||'';
+    document.getElementById('saAccessEnd').value = school.accessEnd||'';
+    document.getElementById('saPassField').style.display='none';
+    document.getElementById('btnSaCreate').textContent='மாற்றங்களைச் சேமி';
+    document.getElementById('btnSaCancelEdit').style.display='';
+    document.getElementById('saEmailChangeBlock').style.display = school.adminUid ? '' : 'none';
+    document.getElementById('saErr').textContent='';
+    document.getElementById('saSuccess').style.display='none';
+    window.scrollTo(0,0);
+  }
+
+  function deleteSchool(school){
+    if(!window.confirm('"'+school.name+'" பாடசாலையையும் அதன் அனைத்துத் தரவையும் நிரந்தரமாக நீக்கவா? இதை மீட்க முடியாது.')) return;
+    var schoolRef = db.collection('schools').doc(school.id);
+    Promise.all([
+      schoolRef.collection('departments').get(),
+      schoolRef.collection('config').get()
+    ]).then(function(results){
+      var deletes = [];
+      results[0].forEach(function(d){ deletes.push(d.ref.delete()); });
+      results[1].forEach(function(d){ deletes.push(d.ref.delete()); });
+      if(school.adminUid) deletes.push(db.collection('users').doc(school.adminUid).delete());
+      deletes.push(schoolRef.delete());
+      return Promise.all(deletes);
+    }).then(function(){
+      if(editingSchoolId===school.id) resetFormToCreateMode();
+      loadSchools();
+    }).catch(function(err){ window.alert('நீக்கும்போது பிழை: '+err.message); });
+  }
+
+  document.getElementById('btnSaCancelEdit').onclick = resetFormToCreateMode;
 
   document.getElementById('btnSaCreate').onclick=function(){
     var name = document.getElementById('saSchoolName').value.trim();
+    var principalName = document.getElementById('saPrincipalName').value.trim();
     var email = document.getElementById('saEmail').value.trim();
     var pass = document.getElementById('saPass').value;
+    var accessStart = document.getElementById('saAccessStart').value || null;
+    var accessEnd = document.getElementById('saAccessEnd').value || null;
     var errEl = document.getElementById('saErr');
     var okEl = document.getElementById('saSuccess');
     errEl.textContent=''; okEl.style.display='none';
     if(!name){ errEl.textContent='பாடசாலையின் பெயரை இட்டு நிரப்பவும்.'; return; }
+
+    if(editingSchoolId){
+      var sid = editingSchoolId;
+      var school = state.schoolsCache.filter(function(s){ return s.id===sid; })[0];
+      var updates = [
+        db.collection('schools').doc(sid).update({name:name, accessStart:accessStart, accessEnd:accessEnd}),
+        db.collection('schools').doc(sid).collection('config').doc('school').set({name:name}, {merge:true})
+      ];
+      if(school && school.adminUid) updates.push(db.collection('users').doc(school.adminUid).update({name:principalName}));
+      Promise.all(updates).then(function(){
+        okEl.style.display='block';
+        okEl.textContent = '"'+name+'" இன் விபரங்கள் புதுப்பிக்கப்பட்டன.';
+        resetFormToCreateMode();
+        loadSchools();
+      }).catch(function(err){ errEl.textContent = err.message; });
+      return;
+    }
+
     if(!email || !pass){ errEl.textContent='மின்னஞ்சலும் கடவுச்சொல்லும் இட்டு நிரப்பவும்.'; return; }
     if(pass.length<6){ errEl.textContent='கடவுச்சொல் 6 எழுத்துகளுக்கு மேல் இருக்க வேண்டும்.'; return; }
     var schoolId = db.collection('schools').doc().id;
-    var schoolMetaObj = {name:name, year:String(new Date().getFullYear()), logoData:null, createdAt:new Date().toISOString()};
+    var schoolMetaObj = {name:name, year:String(new Date().getFullYear()), logoData:null, createdAt:new Date().toISOString(), accessStart:accessStart, accessEnd:accessEnd};
     db.collection('schools').doc(schoolId).set(schoolMetaObj).then(function(){
       return db.collection('schools').doc(schoolId).collection('config').doc('school').set({name:schoolMetaObj.name, year:schoolMetaObj.year, logoData:null});
     }).then(function(){
@@ -1779,16 +1909,43 @@ function renderSuperAdmin(app){
       var secAuth = sec.auth();
       return secAuth.createUserWithEmailAndPassword(email, pass).then(function(cred){
         var newUid = cred.user.uid;
-        return db.collection('users').doc(newUid).set({email:email, role:'admin', schoolId:schoolId}).then(function(){
+        return db.collection('users').doc(newUid).set({email:email, role:'admin', schoolId:schoolId, name:principalName}).then(function(){
           return secAuth.signOut();
         });
       });
     }).then(function(){
-      document.getElementById('saSchoolName').value='';
-      document.getElementById('saEmail').value='';
-      document.getElementById('saPass').value='';
+      resetFormToCreateMode();
       okEl.style.display='block';
       okEl.textContent = '"'+name+'" உருவாக்கப்பட்டது. உள்நுழைவு விபரங்களை ('+email+') அதிபரிடம் வழங்கவும்.';
+      loadSchools();
+    }).catch(function(err){ errEl.textContent = friendlyAuthError(err); });
+  };
+
+  document.getElementById('btnSaChangeEmail').onclick=function(){
+    var sid = editingSchoolId;
+    var school = state.schoolsCache.filter(function(s){ return s.id===sid; })[0];
+    var newEmail = document.getElementById('saNewEmail').value.trim();
+    var newPass = document.getElementById('saNewPass').value;
+    var errEl = document.getElementById('saEmailErr');
+    errEl.textContent='';
+    if(!school || !school.adminUid){ errEl.textContent='இந்தப் பாடசாலைக்கு உள்நுழைவு இன்னும் இல்லை.'; return; }
+    if(!newEmail || !newPass){ errEl.textContent='புதிய மின்னஞ்சலும் கடவுச்சொல்லும் இட்டு நிரப்பவும்.'; return; }
+    if(newPass.length<6){ errEl.textContent='கடவுச்சொல் 6 எழுத்துகளுக்கு மேல் இருக்க வேண்டும்.'; return; }
+    var oldUid = school.adminUid;
+    var principalName = document.getElementById('saPrincipalName').value.trim();
+    var sec = getSecondaryApp();
+    var secAuth = sec.auth();
+    secAuth.createUserWithEmailAndPassword(newEmail, newPass).then(function(cred){
+      var newUid = cred.user.uid;
+      return db.collection('users').doc(newUid).set({email:newEmail, role:'admin', schoolId:sid, name:principalName}).then(function(){
+        return secAuth.signOut();
+      }).then(function(){
+        return db.collection('users').doc(oldUid).delete();
+      });
+    }).then(function(){
+      document.getElementById('saSuccess').style.display='block';
+      document.getElementById('saSuccess').textContent = 'புதிய உள்நுழைவு ('+newEmail+') தயாராகிவிட்டது. இதைப் பாடசாலை அதிபரிடம் வழங்கவும்.';
+      resetFormToCreateMode();
       loadSchools();
     }).catch(function(err){ errEl.textContent = friendlyAuthError(err); });
   };
@@ -1797,6 +1954,23 @@ function renderSuperAdmin(app){
 }
 
 /* ---------------- boot ---------------- */
+
+function renderAccessBlocked(app){
+  var r = state.accessBlockReason || {};
+  var msg = r.kind==='notStarted'
+    ? 'இந்தப் பாடசாலைக்கான அணுகல் இன்னும் தொடங்கவில்லை ('+escapeHtml(r.start||'')+' முதல் தொடங்கும்).'
+    : 'இந்தப் பாடசாலைக்கான அணுகல் காலம் முடிவடைந்துவிட்டது ('+escapeHtml(r.end||'')+' இல் முடிவடைந்தது).';
+  app.innerHTML = topbarHtml('') +
+    '<div class="center-wrap">'+
+      '<div class="login-card">'+
+        '<h1>அணுகல் கிடைக்கவில்லை</h1>'+
+        '<p>'+msg+'</p>'+
+        '<p class="hint">மேலதிக விபரங்களுக்கு நிர்வாகியைத் தொடர்பு கொள்ளவும்.</p>'+
+        '<button class="btn-outline" id="btnAccessLogout">← வெளியேறு</button>'+
+      '</div>'+
+    '</div>';
+  document.getElementById('btnAccessLogout').onclick=function(){ auth.signOut(); };
+}
 
 function renderFatalError(message){
   var app = document.getElementById('app');
