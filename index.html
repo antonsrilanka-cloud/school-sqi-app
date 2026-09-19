@@ -226,10 +226,12 @@
   .report-print-header{ display:none; }
   @media print{
     @page{ size: A4; margin: 10mm; }
-    .report-print-header{ display:block; text-align:center; margin-bottom:10px; }
-    .report-crit-title{ break-after:avoid; page-break-after:avoid; }
-    .report-ind{ break-inside:avoid; }
+    .report-print-header{ display:block; text-align:center; margin-bottom:6px; }
+    .report-crit-title{ break-after:avoid; page-break-after:avoid; margin-bottom:6px; padding-bottom:3px; }
+    .report-ind{ break-inside:avoid; padding:8px 0; gap:4px; margin-bottom:2px; }
     .report-entry{ break-inside:avoid; }
+    .report-crit-block{ margin-bottom:10px; }
+    .dept-header{ padding:4px 0 2px; }
     footer.app-footer{ padding:6px 0 0; margin-top:10px; page-break-before:avoid; break-before:avoid; page-break-inside:avoid; break-inside:avoid; }
   }
 </style>
