@@ -212,7 +212,7 @@
   .report-ind{ display:flex; flex-direction:column; align-items:stretch; gap:8px; border-top:1px dashed var(--line); padding:14px 0; page-break-inside:avoid; margin-bottom:6px; }
   .report-ind:first-child{ border-top:none; }
   .report-entry{ display:flex; gap:14px; align-items:flex-start; padding:8px 0 8px 10px; border-left:2px solid var(--gold-light); page-break-inside:avoid; }
-  .report-img, .report-img-empty{ width:150px; height:110px; flex:0 0 auto; border-radius:5px; border:1px solid var(--line); }
+  .report-img, .report-img-empty{ width:190px; height:140px; flex:0 0 auto; border-radius:5px; border:1px solid var(--line); }
   .report-img{ object-fit:cover; }
   .report-img-empty{ display:flex; align-items:center; justify-content:center; background:#F2ECDD; color:var(--ink-soft); font-size:.75rem; text-align:center; padding:6px; }
   .report-ind-body{ flex:1; min-width:0; }
@@ -1294,10 +1294,7 @@ function renderEvidenceReport(app, scope){
       '<button class="btn-outline no-print" id="btnPrintReport">PDF ஆக பதிவிறக்கு (Print → Save as PDF)</button> '+
       '<button class="btn-ghost no-print" id="btnBackReport">← திரும்பு</button>'
     ) +
-    '<div class="report-print-header">'+brandMarkHtml(60)+
-      '<h1 style="margin:6px 0 2px">'+escapeHtml(state.school.name||'')+'</h1>'+
-      '<div style="color:var(--ink-soft);font-size:.85rem">'+escapeHtml(subtitle)+' · '+escapeHtml(todayStr)+'</div>'+
-    '</div>'+
+    '<div class="report-print-header" style="text-align:center;color:var(--ink-soft);font-size:.85rem;margin-bottom:10px">'+escapeHtml(subtitle)+' · '+escapeHtml(todayStr)+'</div>'+
     '<div class="setup-notice no-print">இந்தப் பக்கத்தை PDF கோப்பாகச் சேமிக்க, மேலே உள்ள பொத்தானை அழுத்தி, திறக்கும் Print சாளரத்தில் "Destination" இல் <strong>Save as PDF</strong> ஐத் தேர்ந்தெடுத்து Save செய்யவும்.</div>'+
     '<div id="reportBody">'+bodyHtml+'</div>'+
     '<footer class="app-footer">பாடசாலைக் கல்விப் பண்புத்தர மதிப்பீட்டு சான்று அறிக்கை.</footer>';
