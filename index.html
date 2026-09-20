@@ -125,8 +125,7 @@
   .criterion{ background:var(--paper-2); border:1px solid var(--line); border-radius:6px; padding:14px 16px; }
   .criterion-head{ display:flex; align-items:center; gap:10px; margin-bottom:10px; }
   .crit-num{ font-size:.78rem; color:var(--gold); font-weight:700; white-space:nowrap; }
-  .crit-title{ flex:1; font-weight:600; border:1px solid transparent; background:transparent; padding:6px 8px; }
-  .crit-title:hover{ border-color:var(--line); }
+  .crit-title{ flex:1; font-weight:600; padding:6px 8px; }
   .ind-list{ display:flex; flex-direction:column; gap:10px; margin-bottom:10px; }
   .ind-row{
     display:flex; gap:10px; align-items:flex-start; border-top:1px dashed var(--line); padding-top:10px;
@@ -1023,7 +1022,7 @@ function criterionHtml(c, cIdx, isAdmin){
   return '<section class="criterion" data-crit="'+c.id+'">'+
     '<div class="criterion-head">'+
       '<span class="crit-num">நியதி '+(cIdx+1)+'</span>'+
-      '<input class="crit-title" type="text" data-role="ctitle" value="'+escapeHtml(c.title)+'">'+
+      '<span class="crit-title">'+escapeHtml(c.title)+'</span>'+
       (isAdmin ? '<button type="button" class="btn-tiny" data-role="printcrit" title="இந்த நியதியை மட்டும் PDF ஆக பதிவிறக்கு">நியதி PDF</button>' : '')+
     '</div>'+
     '<div class="ind-list">'+c.indicators.map(function(ind,i){ return indicatorRowHtml(ind,i); }).join('')+'</div>'+
@@ -1087,7 +1086,6 @@ function renderDeptView(app, deptId, opts){
     for(var i=0;i<dData.criteria.length;i++){ if(dData.criteria[i].id===critId){ c=dData.criteria[i]; break; } }
     if(!c) return;
 
-    critEl.querySelector('[data-role="ctitle"]').oninput=function(e){ c.title=e.target.value; scheduleSaveDept(deptId); };
     var printBtn = critEl.querySelector('[data-role="printcrit"]');
     if(printBtn){
       printBtn.onclick=function(){
@@ -1294,8 +1292,7 @@ function renderEvidenceReport(app, scope){
       '<button class="btn-outline no-print" id="btnPrintReport">PDF ஆக பதிவிறக்கு (Print → Save as PDF)</button> '+
       '<button class="btn-ghost no-print" id="btnBackReport">← திரும்பு</button>'
     ) +
-    '<div class="report-print-header">'+brandMarkHtml(60)+
-      '<h1 style="margin:6px 0 2px">'+escapeHtml(state.school.name||'')+'</h1>'+
+    '<div class="report-print-header">'+
       '<div style="color:var(--ink-soft);font-size:.85rem">'+escapeHtml(subtitle)+' · '+escapeHtml(todayStr)+'</div>'+
     '</div>'+
     '<div class="setup-notice no-print">இந்தப் பக்கத்தை PDF கோப்பாகச் சேமிக்க, மேலே உள்ள பொத்தானை அழுத்தி, திறக்கும் Print சாளரத்தில் "Destination" இல் <strong>Save as PDF</strong> ஐத் தேர்ந்தெடுத்து Save செய்யவும்.</div>'+
